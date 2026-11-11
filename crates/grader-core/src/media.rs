@@ -121,7 +121,11 @@ pub fn get_video_preset(key: &str) -> &'static VideoPreset {
     VIDEO_PRESET_LIST
         .iter()
         .find(|p| p.key == key)
-        .or_else(|| VIDEO_PRESET_LIST.iter().find(|p| p.key == DEFAULT_VIDEO_PRESET))
+        .or_else(|| {
+            VIDEO_PRESET_LIST
+                .iter()
+                .find(|p| p.key == DEFAULT_VIDEO_PRESET)
+        })
         .expect("default video preset exists")
 }
 
@@ -137,7 +141,11 @@ pub struct MediaProgress {
 /// 3. Trong thư mục `bin_dir` của app
 /// 4. `ffmpeg` trong `PATH` hệ thống
 pub fn resolve_ffmpeg(custom_path: Option<&Path>, bin_dir: Option<&Path>) -> Option<PathBuf> {
-    let exe_name = if cfg!(windows) { "ffmpeg.exe" } else { "ffmpeg" };
+    let exe_name = if cfg!(windows) {
+        "ffmpeg.exe"
+    } else {
+        "ffmpeg"
+    };
 
     if let Some(p) = custom_path.filter(|p| p.is_file()) {
         return Some(p.to_path_buf());
@@ -442,7 +450,16 @@ pub async fn extract_mp3<F>(
 where
     F: FnMut(MediaProgress) + Send,
 {
-    extract_mp3_to(ffmpeg_exe, video_path, preset_key, out_dir, None, on_progress, cancel).await
+    extract_mp3_to(
+        ffmpeg_exe,
+        video_path,
+        preset_key,
+        out_dir,
+        None,
+        on_progress,
+        cancel,
+    )
+    .await
 }
 
 fn file_stem_and_ext<'a>(
@@ -575,7 +592,16 @@ pub async fn compress_video<F>(
 where
     F: FnMut(MediaProgress) + Send,
 {
-    compress_video_to(ffmpeg_exe, video_path, preset_key, out_dir, None, on_progress, cancel).await
+    compress_video_to(
+        ffmpeg_exe,
+        video_path,
+        preset_key,
+        out_dir,
+        None,
+        on_progress,
+        cancel,
+    )
+    .await
 }
 
 /// Nén video bằng `ffmpeg` theo preset với đường dẫn file đầu ra tùy chọn.
@@ -723,9 +749,11 @@ where
         cmd.creation_flags(CREATE_NO_WINDOW);
     }
 
-    let mut child = cmd
-        .spawn()
-        .map_err(|e| GraderError::Io(std::io::Error::other(format!("Không chạy được ffmpeg: {e}"))))?;
+    let mut child = cmd.spawn().map_err(|e| {
+        GraderError::Io(std::io::Error::other(format!(
+            "Không chạy được ffmpeg: {e}"
+        )))
+    })?;
 
     let stdout = child.stdout.take();
     let stderr = child.stderr.take();
@@ -765,7 +793,8 @@ where
                     if let Some(us_str) = line.strip_prefix("out_time_us=") {
                         if let (Ok(us), Some(dur)) = (us_str.trim().parse::<i64>(), duration_secs) {
                             if us >= 0 && dur > 0.0 {
-                                let pct = (((us as f64) / 1_000_000.0 / dur) * 100.0).clamp(0.0, 99.5);
+                                let pct =
+                                    (((us as f64) / 1_000_000.0 / dur) * 100.0).clamp(0.0, 99.5);
                                 on_progress(MediaProgress {
                                     stage: stage_label.to_string(),
                                     percent: Some(pct as f32),

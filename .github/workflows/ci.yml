@@ -1,0 +1,64 @@
+name: CI (Lint, Format, Typecheck & Tests)
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  rust-and-ui-checks:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux Tauri system libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            libssl-dev \
+            ffmpeg
+
+      - name: Install Rust stable (with clippy & rustfmt)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            .
+            src-tauri
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+
+      - name: Check Rust formatting
+        run: |
+          cargo fmt --manifest-path Cargo.toml --all -- --check
+          cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
+
+      - name: Run Clippy (-D warnings)
+        run: |
+          cargo clippy --manifest-path Cargo.toml -p grader-core --all-targets -- -D warnings
+          cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+
+      - name: Run Rust tests (grader-core & src-tauri)
+        run: |
+          cargo test --manifest-path Cargo.toml --workspace
+          cargo test --manifest-path src-tauri/Cargo.toml
+
+      - name: Install & verify UI (typecheck, lint, test, build)
+        run: |
+          npm --prefix ui ci
+          npm --prefix ui run check

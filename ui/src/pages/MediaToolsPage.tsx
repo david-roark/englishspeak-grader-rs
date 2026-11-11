@@ -11,13 +11,13 @@ import {
 import { LocalMediaPlayer } from "../components/LocalMediaPlayer";
 import { MediaDropZone } from "../components/MediaDropZone";
 import { MediaResultCard } from "../components/MediaResultCard";
+import { OutputLocationPicker } from "../components/OutputLocationPicker";
 import {
   loadSavedOutputTarget,
-  OutputLocationPicker,
   resolveOutputOverrides,
   saveOutputTarget,
   type OutputTargetState,
-} from "../components/OutputLocationPicker";
+} from "../lib/outputTarget";
 import { ProgressPanel } from "../components/ProgressPanel";
 import { SelectField } from "../components/SelectField";
 import { api } from "../lib/api";

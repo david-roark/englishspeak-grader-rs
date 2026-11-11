@@ -210,7 +210,10 @@ fn test_assessment_roundtrip_search_rename_and_delete() {
     db.rename_student(hs2_id, "Trần Minh Bình").unwrap();
 
     let updated = db.get_assessment(id1).unwrap().unwrap();
-    assert_eq!(updated.students[1].assessment.student_name, "Trần Minh Bình");
+    assert_eq!(
+        updated.students[1].assessment.student_name,
+        "Trần Minh Bình"
+    );
     assert_eq!(updated.students[1].original_ai_name, "Học sinh 2");
     assert!(updated.students[1].assessment.name_confident);
 

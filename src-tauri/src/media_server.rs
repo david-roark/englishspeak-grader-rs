@@ -124,7 +124,9 @@ struct HttpRequest {
     close_requested: bool,
 }
 
-async fn read_http_request(reader: &mut BufReader<TcpStream>) -> std::io::Result<Option<HttpRequest>> {
+async fn read_http_request(
+    reader: &mut BufReader<TcpStream>,
+) -> std::io::Result<Option<HttpRequest>> {
     let mut request_line = String::new();
     let bytes_read = read_limited_line(reader, &mut request_line).await?;
     if bytes_read == 0 {
@@ -169,9 +171,7 @@ async fn read_http_request(reader: &mut BufReader<TcpStream>) -> std::io::Result
             let val_trimmed = val.trim();
             if name_lower == "range" {
                 range_header = Some(val_trimmed.to_string());
-            } else if name_lower == "connection"
-                && val_trimmed.eq_ignore_ascii_case("close")
-            {
+            } else if name_lower == "connection" && val_trimmed.eq_ignore_ascii_case("close") {
                 close_requested = true;
             }
         }
@@ -568,7 +568,8 @@ mod tests {
 
     #[test]
     fn percent_decode_handles_spaces_parens_plus_and_unicode() {
-        let encoded = "/home/david/Downloads/sample_video.mp4%20(240p)%2B%20b%C3%A0i%20n%C3%B3i.mp4";
+        let encoded =
+            "/home/david/Downloads/sample_video.mp4%20(240p)%2B%20b%C3%A0i%20n%C3%B3i.mp4";
         assert_eq!(
             percent_decode(encoded),
             "/home/david/Downloads/sample_video.mp4 (240p)+ bài nói.mp4"

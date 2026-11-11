@@ -55,10 +55,7 @@ fn test_model_filtering_and_ranking() {
         "models/gemini-flash-lite-latest".into(),
         "models/gemini-2.5-flash-tts".into(),
     ]);
-    assert_eq!(
-        filtered,
-        vec!["gemini-flash-lite-latest", "gemini-2.5-pro"]
-    );
+    assert_eq!(filtered, vec!["gemini-flash-lite-latest", "gemini-2.5-pro"]);
 }
 
 #[test]
@@ -107,8 +104,12 @@ async fn test_upload_video_resumable_and_cache_flow() {
     let dir = TempDir::new().unwrap();
     let video_a = dir.path().join("a.mp4");
     let video_b = dir.path().join("b.mp4");
-    tokio::fs::write(&video_a, b"fake video A bytes").await.unwrap();
-    tokio::fs::write(&video_b, b"fake video B bytes").await.unwrap();
+    tokio::fs::write(&video_a, b"fake video A bytes")
+        .await
+        .unwrap();
+    tokio::fs::write(&video_b, b"fake video B bytes")
+        .await
+        .unwrap();
 
     let upload_session_url = format!("{}/upload-session/1", server.uri());
 
@@ -117,7 +118,8 @@ async fn test_upload_video_resumable_and_cache_flow() {
         .and(path("/upload/v1beta/files"))
         .and(header("X-Goog-Upload-Command", "start"))
         .respond_with(
-            ResponseTemplate::new(200).insert_header("X-Goog-Upload-URL", upload_session_url.as_str()),
+            ResponseTemplate::new(200)
+                .insert_header("X-Goog-Upload-URL", upload_session_url.as_str()),
         )
         .mount(&server)
         .await;
@@ -233,7 +235,9 @@ async fn test_grade_video_success_and_errors() {
     let json_text = serde_json::to_string(&valid).unwrap();
 
     Mock::given(method("POST"))
-        .and(path("/v1beta/models/gemini-flash-lite-latest:generateContent"))
+        .and(path(
+            "/v1beta/models/gemini-flash-lite-latest:generateContent",
+        ))
         .and(query_param("key", "test-key"))
         .and(wiremock::matchers::body_partial_json(json!({
             "systemInstruction": {
@@ -283,7 +287,9 @@ async fn test_grade_video_success_and_errors() {
     // Broken JSON response
     let bad_server = MockServer::start().await;
     Mock::given(method("POST"))
-        .and(path("/v1beta/models/gemini-flash-lite-latest:generateContent"))
+        .and(path(
+            "/v1beta/models/gemini-flash-lite-latest:generateContent",
+        ))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "candidates": [{ "content": { "parts": [{ "text": "{broken" }] } }]
         })))

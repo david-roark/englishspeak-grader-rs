@@ -167,9 +167,9 @@ pub fn build_prompt_parts(
         .unwrap_or("Viết nhận xét bằng tiếng Việt.");
 
     let names_line = match student_names {
-        Some(names) if !names.is_empty() => {
-            profile.names_with_list.replace("{names}", &names.join(", "))
-        }
+        Some(names) if !names.is_empty() => profile
+            .names_with_list
+            .replace("{names}", &names.join(", ")),
         _ => profile.names_auto_detect.clone(),
     };
 

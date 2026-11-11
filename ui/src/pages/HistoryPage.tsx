@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   LayoutList,
   Loader2,
@@ -43,7 +43,7 @@ export function HistoryPage() {
 
   const hasMore = rows.length >= limit;
 
-  async function refresh(q = query, nextLimit = limit) {
+  const refresh = useCallback(async (q: string, nextLimit: number) => {
     const reqId = ++requestSeqRef.current;
     setLoading(true);
     setErr("");
@@ -61,11 +61,11 @@ export function HistoryPage() {
         setLoading(false);
       }
     }
-  }
+  }, []);
 
   useEffect(() => {
     void refresh("", PAGE_STEP);
-  }, []);
+  }, [refresh]);
 
   function changeViewMode(mode: HistoryViewMode) {
     setViewMode(mode);

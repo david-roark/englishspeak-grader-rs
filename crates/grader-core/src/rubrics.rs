@@ -263,16 +263,16 @@ impl Rubric {
         if !self.description.trim().is_empty() {
             lines.push(self.description.clone());
         }
-        lines.push(format!("Cách tính tổng điểm: {}", self.scoring_formula_summary()));
+        lines.push(format!(
+            "Cách tính tổng điểm: {}",
+            self.scoring_formula_summary()
+        ));
         if !self.scale_note.is_empty() {
             lines.push(format!("Thang điểm: {}", self.scale_note));
         }
 
-        let show_weights = self.is_weighted_avg()
-            || self
-                .criteria
-                .iter()
-                .any(|c| (c.weight - 1.0).abs() > 1e-6);
+        let show_weights =
+            self.is_weighted_avg() || self.criteria.iter().any(|c| (c.weight - 1.0).abs() > 1e-6);
         let total_w = self.total_weight();
 
         lines.push("Các tiêu chí:".to_string());
@@ -315,11 +315,8 @@ impl Rubric {
 
     /// Render rubric thành khối Markdown đầy đủ.
     pub fn to_markdown(&self) -> String {
-        let show_weights = self.is_weighted_avg()
-            || self
-                .criteria
-                .iter()
-                .any(|c| (c.weight - 1.0).abs() > 1e-6);
+        let show_weights =
+            self.is_weighted_avg() || self.criteria.iter().any(|c| (c.weight - 1.0).abs() > 1e-6);
         let total_w = self.total_weight();
 
         let rows: Vec<String> = self
@@ -558,7 +555,10 @@ pub fn format_result_markdown(result: &AssessmentResult) -> String {
         if !s.evidence.is_empty() {
             lines.push("**Dẫn chứng trong video:**".to_string());
             for ev in &s.evidence {
-                lines.push(format!("- `{}` — {} _({})_", ev.timestamp, ev.quote, ev.note));
+                lines.push(format!(
+                    "- `{}` — {} _({})_",
+                    ev.timestamp, ev.quote, ev.note
+                ));
             }
             lines.push(String::new());
         }

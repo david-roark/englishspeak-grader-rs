@@ -6,9 +6,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
 use crate::error::{GraderError, Result};
-use crate::prompts::{
-    default_strictness, default_temperature, merge_with_default, PromptProfile,
-};
+use crate::prompts::{default_strictness, default_temperature, merge_with_default, PromptProfile};
 use crate::rubrics::{
     builtin_rubrics, default_scoring_mode, default_weight, Criterion, CriterionLevel, Rubric,
 };
@@ -236,12 +234,11 @@ impl Database {
         for rubric in builtin_rubrics() {
             upsert_rubric_tx(&tx, rubric, &now)?;
         }
-        let has_default_prompt: bool = tx
-            .query_row(
-                "SELECT EXISTS(SELECT 1 FROM prompt_profiles WHERE id = 'default')",
-                [],
-                |row| row.get(0),
-            )?;
+        let has_default_prompt: bool = tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM prompt_profiles WHERE id = 'default')",
+            [],
+            |row| row.get(0),
+        )?;
         if !has_default_prompt {
             let def = PromptProfile::default();
             save_prompt_profile_tx(&tx, &def, &now)?;
@@ -286,7 +283,9 @@ impl Database {
     pub fn get_all_settings(&self) -> Result<BTreeMap<String, String>> {
         let conn = self.connect()?;
         let mut stmt = conn.prepare("SELECT key, value FROM app_settings ORDER BY key")?;
-        let rows = stmt.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))?;
+        let rows = stmt.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?;
         let mut map = BTreeMap::new();
         for r in rows {
             let (k, v) = r?;
@@ -322,8 +321,16 @@ impl Database {
 
         let mut rubrics = Vec::new();
         for row in rows {
-            let (id, name, description, scale_note, is_builtin, scoring_mode, target_scale, rounding_step) =
-                row?;
+            let (
+                id,
+                name,
+                description,
+                scale_note,
+                is_builtin,
+                scoring_mode,
+                target_scale,
+                rounding_step,
+            ) = row?;
             let criteria = load_criteria(&conn, &id)?;
             rubrics.push(Rubric {
                 id,
@@ -364,7 +371,16 @@ impl Database {
             .optional()?;
 
         match row {
-            Some((id, name, description, scale_note, is_builtin, scoring_mode, target_scale, rounding_step)) => {
+            Some((
+                id,
+                name,
+                description,
+                scale_note,
+                is_builtin,
+                scoring_mode,
+                target_scale,
+                rounding_step,
+            )) => {
                 let criteria = load_criteria(&conn, &id)?;
                 Ok(Some(Rubric {
                     id,
@@ -435,9 +451,9 @@ impl Database {
     }
 
     pub fn clone_rubric(&self, source_id: &str, new_id: &str, new_name: &str) -> Result<Rubric> {
-        let source = self
-            .get_rubric(source_id)?
-            .ok_or_else(|| GraderError::InvalidInput(format!("Không tìm thấy rubric '{source_id}'.")))?;
+        let source = self.get_rubric(source_id)?.ok_or_else(|| {
+            GraderError::InvalidInput(format!("Không tìm thấy rubric '{source_id}'."))
+        })?;
         let cloned = Rubric {
             id: new_id.trim().to_string(),
             name: new_name.trim().to_string(),
@@ -537,9 +553,9 @@ impl Database {
     }
 
     pub fn set_active_prompt_profile(&self, id: &str) -> Result<PromptProfile> {
-        let profile = self
-            .get_prompt_profile(id)?
-            .ok_or_else(|| GraderError::InvalidInput(format!("Không tìm thấy Prompt Profile '{id}'.")))?;
+        let profile = self.get_prompt_profile(id)?.ok_or_else(|| {
+            GraderError::InvalidInput(format!("Không tìm thấy Prompt Profile '{id}'."))
+        })?;
         self.set_setting("active_prompt_profile_id", &profile.id)?;
         Ok(profile)
     }
@@ -689,7 +705,11 @@ impl Database {
         Ok(assessment_id)
     }
 
-    pub fn list_assessments(&self, query: Option<&str>, limit: usize) -> Result<Vec<AssessmentSummary>> {
+    pub fn list_assessments(
+        &self,
+        query: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<AssessmentSummary>> {
         let conn = self.connect()?;
         let q = query.map(str::trim).filter(|s| !s.is_empty());
         let limit_i64 = limit.max(1) as i64;
@@ -1057,13 +1077,16 @@ fn map_prompt_profile_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<PromptPro
     let rules_json: String = row.get(5)?;
     let tasks_json: String = row.get(6)?;
     let langs_json: String = row.get(7)?;
-    let temperature: f64 = row.get::<_, Option<f64>>(8)?.unwrap_or(f64::from(default_temperature()));
+    let temperature: f64 = row
+        .get::<_, Option<f64>>(8)?
+        .unwrap_or(f64::from(default_temperature()));
     let strictness: String = row
         .get::<_, Option<String>>(9)?
         .unwrap_or_else(default_strictness);
 
     let grading_rules: Vec<String> = serde_json::from_str(&rules_json).unwrap_or_default();
-    let task_types: BTreeMap<String, String> = serde_json::from_str(&tasks_json).unwrap_or_default();
+    let task_types: BTreeMap<String, String> =
+        serde_json::from_str(&tasks_json).unwrap_or_default();
     let feedback_languages: BTreeMap<String, String> =
         serde_json::from_str(&langs_json).unwrap_or_default();
 

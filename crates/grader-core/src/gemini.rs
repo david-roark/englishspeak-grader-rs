@@ -146,9 +146,7 @@ pub fn validate_api_key(api_key: &str) -> Result<String> {
 }
 
 pub fn is_gradable_model(model_id: &str) -> bool {
-    let mid = model_id
-        .trim()
-        .to_lowercase();
+    let mid = model_id.trim().to_lowercase();
     let mid = mid.strip_prefix("models/").unwrap_or(&mid);
     if !mid.starts_with("gemini") {
         return false;
@@ -275,7 +273,11 @@ impl GeminiClient {
                 {
                     continue;
                 }
-                let name = m.name.strip_prefix("models/").unwrap_or(&m.name).to_string();
+                let name = m
+                    .name
+                    .strip_prefix("models/")
+                    .unwrap_or(&m.name)
+                    .to_string();
                 if is_gradable_model(&name) {
                     collected.push(name);
                 }
@@ -293,7 +295,10 @@ impl GeminiClient {
     /// Lấy thông tin trạng thái của file trên Gemini File API.
     pub async fn get_file(&self, file_name: &str) -> Result<UploadedFile> {
         let normalized = file_name.strip_prefix('/').unwrap_or(file_name);
-        let url = format!("{}/v1beta/{}?key={}", self.base_url, normalized, self.api_key);
+        let url = format!(
+            "{}/v1beta/{}?key={}",
+            self.base_url, normalized, self.api_key
+        );
         let resp = self
             .http
             .get(&url)
@@ -360,7 +365,10 @@ impl GeminiClient {
             .post(&start_url)
             .header("X-Goog-Upload-Protocol", "resumable")
             .header("X-Goog-Upload-Command", "start")
-            .header("X-Goog-Upload-Header-Content-Length", total_bytes.to_string())
+            .header(
+                "X-Goog-Upload-Header-Content-Length",
+                total_bytes.to_string(),
+            )
             .header("X-Goog-Upload-Header-Content-Type", mime_type)
             .json(&json!({ "file": { "display_name": display_name } }))
             .send()
@@ -491,7 +499,8 @@ impl GeminiClient {
     where
         F: FnMut(UploadProgress) + Send,
     {
-        let canonical = std::fs::canonicalize(video_path).unwrap_or_else(|_| video_path.to_path_buf());
+        let canonical =
+            std::fs::canonicalize(video_path).unwrap_or_else(|_| video_path.to_path_buf());
         let meta = tokio::fs::metadata(video_path).await?;
         let file_size = meta.len();
         let modified_secs = meta
@@ -673,7 +682,10 @@ impl GeminiClient {
             return;
         }
         let normalized = file_name.strip_prefix('/').unwrap_or(file_name);
-        let url = format!("{}/v1beta/{}?key={}", self.base_url, normalized, self.api_key);
+        let url = format!(
+            "{}/v1beta/{}?key={}",
+            self.base_url, normalized, self.api_key
+        );
         let _ = self
             .http
             .delete(&url)
@@ -756,7 +768,11 @@ impl AsyncRead for ProgressAsyncReader {
         cx: &mut Context<'_>,
         buf: &mut ReadBuf<'_>,
     ) -> Poll<std::io::Result<()>> {
-        if self.cancel.as_ref().is_some_and(CancellationToken::is_cancelled) {
+        if self
+            .cancel
+            .as_ref()
+            .is_some_and(CancellationToken::is_cancelled)
+        {
             return Poll::Ready(Err(std::io::Error::new(
                 std::io::ErrorKind::Interrupted,
                 "cancelled",

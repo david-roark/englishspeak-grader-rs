@@ -1,6 +1,8 @@
 use std::collections::BTreeMap;
 
-use grader_core::prompts::{build_grading_prompt, build_prompt_parts, merge_with_default, PromptProfile};
+use grader_core::prompts::{
+    build_grading_prompt, build_prompt_parts, merge_with_default, PromptProfile,
+};
 use grader_core::rubrics::{
     builtin_rubrics, format_result_markdown, get_builtin_rubric, Criterion, CriterionLevel, Rubric,
 };
@@ -120,10 +122,30 @@ fn test_rubric_max_total_and_prompt_block() {
     // Weighted average & normalization test (IELTS: average 6.5, 6.5, 7.0, 7.0 -> 6.75 -> rounds to 7.0)
     let ielts = get_builtin_rubric("ielts_speaking").unwrap();
     let (tot, max_tot) = ielts.compute_total_score(&[
-        CriterionScore { criterion: "Fluency and Coherence".into(), score: 6.5, max_score: 9.0, comment: "".into() },
-        CriterionScore { criterion: "Lexical Resource".into(), score: 6.5, max_score: 9.0, comment: "".into() },
-        CriterionScore { criterion: "Grammatical Range and Accuracy".into(), score: 7.0, max_score: 9.0, comment: "".into() },
-        CriterionScore { criterion: "Pronunciation".into(), score: 7.0, max_score: 9.0, comment: "".into() },
+        CriterionScore {
+            criterion: "Fluency and Coherence".into(),
+            score: 6.5,
+            max_score: 9.0,
+            comment: "".into(),
+        },
+        CriterionScore {
+            criterion: "Lexical Resource".into(),
+            score: 6.5,
+            max_score: 9.0,
+            comment: "".into(),
+        },
+        CriterionScore {
+            criterion: "Grammatical Range and Accuracy".into(),
+            score: 7.0,
+            max_score: 9.0,
+            comment: "".into(),
+        },
+        CriterionScore {
+            criterion: "Pronunciation".into(),
+            score: 7.0,
+            max_score: 9.0,
+            comment: "".into(),
+        },
     ]);
     assert_eq!(max_tot, 9.0);
     assert_eq!(tot, 7.0);
@@ -135,7 +157,10 @@ fn test_gemini_schema_has_no_refs_or_defs() {
     let s = serde_json::to_string(&schema).unwrap();
     assert!(!s.contains("$ref"), "schema should inline $ref: {s}");
     assert!(!s.contains("$defs"), "schema should strip $defs: {s}");
-    assert!(!s.contains("definitions"), "schema should strip definitions: {s}");
+    assert!(
+        !s.contains("definitions"),
+        "schema should strip definitions: {s}"
+    );
     assert!(!s.contains("$schema"), "schema should strip $schema: {s}");
     assert!(schema["properties"]["students"]["items"]["properties"]["criteria"].is_object());
 }
@@ -200,8 +225,10 @@ fn test_merge_with_default_restores_missing_fields() {
     assert_eq!(merged.temperature, 1.0);
     assert_eq!(merged.strictness, "standard");
 
-    let mut strict_profile = PromptProfile::default();
-    strict_profile.strictness = "strict".into();
+    let strict_profile = PromptProfile {
+        strictness: "strict".into(),
+        ..Default::default()
+    };
     let parts = build_prompt_parts(
         &strict_profile,
         get_builtin_rubric("ielts_speaking").unwrap(),

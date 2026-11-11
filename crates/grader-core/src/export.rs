@@ -88,9 +88,7 @@ pub fn export_to_excel(
         .set_bold()
         .set_font_color(Color::White)
         .set_background_color(Color::RGB(0x2F5496));
-    let wrap_fmt = Format::new()
-        .set_text_wrap()
-        .set_align(FormatAlign::Top);
+    let wrap_fmt = Format::new().set_text_wrap().set_align(FormatAlign::Top);
 
     // -- Sheet 1: Tổng quan ------------------------------------------------ //
     {
@@ -189,7 +187,10 @@ pub fn export_to_excel(
         .map_err(|e| GraderError::Export(e.to_string()))?;
 
         let mut r = 3u32;
-        for (col, h) in ["Tiêu chí", "Điểm", "Tối đa", "Nhận xét"].iter().enumerate() {
+        for (col, h) in ["Tiêu chí", "Điểm", "Tối đa", "Nhận xét"]
+            .iter()
+            .enumerate()
+        {
             d.write_string_with_format(r, col as u16, *h, &header_fmt)
                 .map_err(|e| GraderError::Export(e.to_string()))?;
         }

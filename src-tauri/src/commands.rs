@@ -309,7 +309,12 @@ pub async fn grade_video_cmd(
     let result = grade_res.map_err(|e| e.to_string())?;
     let elapsed_ms = started.elapsed().as_millis() as u64;
 
-    emit_progress(&app, &req.task_id, "Lưu kết quả & xuất Excel...", Some(92.0));
+    emit_progress(
+        &app,
+        &req.task_id,
+        "Lưu kết quả & xuất Excel...",
+        Some(92.0),
+    );
 
     let video_name = video_path
         .file_name()
@@ -447,7 +452,12 @@ pub async fn compress_video_cmd(
     state.finish_task(&task_id).await;
 
     let out_path = res.map_err(|e| e.to_string())?;
-    Ok(build_media_output(&state, out_path, orig_size_mb, "compressed.mp4"))
+    Ok(build_media_output(
+        &state,
+        out_path,
+        orig_size_mb,
+        "compressed.mp4",
+    ))
 }
 
 #[tauri::command]
@@ -482,7 +492,12 @@ pub async fn extract_mp3_cmd(
     state.finish_task(&task_id).await;
 
     let out_path = res.map_err(|e| e.to_string())?;
-    Ok(build_media_output(&state, out_path, orig_size_mb, "audio.mp3"))
+    Ok(build_media_output(
+        &state,
+        out_path,
+        orig_size_mb,
+        "audio.mp3",
+    ))
 }
 
 #[tauri::command]
@@ -522,7 +537,12 @@ pub async fn trim_media_cmd(
     state.finish_task(&task_id).await;
 
     let out_path = res.map_err(|e| e.to_string())?;
-    Ok(build_media_output(&state, out_path, orig_size_mb, "trimmed.mp4"))
+    Ok(build_media_output(
+        &state,
+        out_path,
+        orig_size_mb,
+        "trimmed.mp4",
+    ))
 }
 
 #[tauri::command]
@@ -555,7 +575,12 @@ pub async fn mute_video_cmd(
     state.finish_task(&task_id).await;
 
     let out_path = res.map_err(|e| e.to_string())?;
-    Ok(build_media_output(&state, out_path, orig_size_mb, "muted.mp4"))
+    Ok(build_media_output(
+        &state,
+        out_path,
+        orig_size_mb,
+        "muted.mp4",
+    ))
 }
 
 #[tauri::command]
@@ -564,7 +589,10 @@ pub fn list_rubrics(state: State<'_, AppState>) -> Result<Vec<Rubric>, String> {
 }
 
 #[tauri::command]
-pub fn save_custom_rubric(state: State<'_, AppState>, rubric: Rubric) -> Result<Vec<Rubric>, String> {
+pub fn save_custom_rubric(
+    state: State<'_, AppState>,
+    rubric: Rubric,
+) -> Result<Vec<Rubric>, String> {
     state
         .db
         .save_custom_rubric(&rubric)
@@ -665,7 +693,10 @@ pub fn export_assessment_excel(
 }
 
 #[tauri::command]
-pub fn get_assessment_markdown(state: State<'_, AppState>, assessment_id: i64) -> Result<String, String> {
+pub fn get_assessment_markdown(
+    state: State<'_, AppState>,
+    assessment_id: i64,
+) -> Result<String, String> {
     let detail = state
         .db
         .get_assessment(assessment_id)
@@ -740,10 +771,7 @@ pub fn set_active_prompt_profile(
 
 #[tauri::command]
 pub fn reset_prompt_profile(state: State<'_, AppState>) -> Result<AppBootstrap, String> {
-    state
-        .db
-        .reset_prompt_profile()
-        .map_err(|e| e.to_string())?;
+    state.db.reset_prompt_profile().map_err(|e| e.to_string())?;
     get_bootstrap(state)
 }
 
@@ -762,7 +790,11 @@ pub fn preview_grading_prompt(
 ) -> Result<PromptParts, String> {
     let resolved_profile = match profile {
         Some(p) => p,
-        None => match profile_id.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        None => match profile_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
             Some(pid) => state
                 .db
                 .get_prompt_profile(pid)
@@ -852,4 +884,27 @@ pub fn save_settings(
     }
 
     get_bootstrap(state)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mask_key_hides_empty_placeholder_short_and_long_keys() {
+        assert_eq!(mask_key(""), "");
+        assert_eq!(mask_key("   "), "");
+        assert_eq!(mask_key("dan_key_cua_ban_vao_day"), "");
+        assert_eq!(mask_key("abcd1234"), "••••••••");
+        assert_eq!(mask_key("AIzaSyDummyKey123456"), "AIza••••3456");
+    }
+
+    #[test]
+    fn parse_student_names_trims_and_ignores_blank_entries() {
+        assert_eq!(
+            parse_student_names("  An , Bình,,  Chi , "),
+            vec!["An".to_string(), "Bình".to_string(), "Chi".to_string()]
+        );
+        assert!(parse_student_names(" , , ").is_empty());
+    }
 }

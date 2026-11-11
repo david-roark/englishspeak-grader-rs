@@ -74,23 +74,35 @@ englishspeak-grader-rs/
 
 ## 🧪 Kiểm thử & Kiểm tra chất lượng code
 
-Chạy toàn bộ các bước sau trước khi tạo Pull Request:
+Chạy nhanh toàn bộ kiểm tra bằng 1 lệnh duy nhất:
 
-1. **Unit & Integration tests của lõi `grader-core`** (gồm mock HTTP bằng `wiremock`, kiểm tra
-   Excel bằng `calamine`, SQLite và `ffmpeg`):
+```bash
+./scripts/check.sh
+```
+
+Hoặc chạy từng bước trước khi tạo Pull Request:
+
+1. **Kiểm tra format Rust (`rustfmt`):**
    ```bash
-   cargo test -p grader-core
+   cargo fmt --manifest-path Cargo.toml --all -- --check
+   cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
    ```
 2. **Lint Rust bằng Clippy (không chấp nhận warning):**
    ```bash
-   cargo clippy -p grader-core --tests -- -D warnings
-   cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings
+   cargo clippy -p grader-core --all-targets -- -D warnings
+   cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
    ```
-3. **Type-check & build Frontend:**
+3. **Unit & Integration tests (`grader-core` + `src-tauri`):**
    ```bash
-   npm --prefix ui run build
+   cargo test --workspace
+   cargo test --manifest-path src-tauri/Cargo.toml
    ```
-4. **Kiểm tra build Tauri không đóng gói installer:**
+4. **Type-check, ESLint, Vitest & Build Frontend:**
+   ```bash
+   npm --prefix ui run check
+   # hoặc chạy lẻ: typecheck | lint | test | build
+   ```
+5. **Kiểm tra build Tauri không đóng gói installer:**
    ```bash
    cargo tauri build --debug --no-bundle
    ```

@@ -1,4 +1,11 @@
-import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import { createPortal } from "react-dom";
 import { Check, ChevronDown } from "lucide-react";
 
@@ -80,7 +87,10 @@ export function SelectField<T extends string = string>({
     return indices.find((i) => !options[i]?.disabled) ?? -1;
   };
 
-  const computePosition = () => {
+  const latestSelectionRef = useRef({ options, value });
+  latestSelectionRef.current = { options, value };
+
+  const computePosition = useCallback(() => {
     const trigger = triggerRef.current;
     if (!trigger) return;
     const rect = trigger.getBoundingClientRect();
@@ -111,14 +121,16 @@ export function SelectField<T extends string = string>({
       maxHeight,
       openUp,
     });
-  };
+  }, []);
 
   useLayoutEffect(() => {
     if (!open) return;
     computePosition();
-    const selectedIdx = options.findIndex((o) => o.value === value && !o.disabled);
-    setHighlightedIndex(selectedIdx >= 0 ? selectedIdx : findEdgeEnabledIndex(false));
-  }, [open]);
+    const { options: curOpts, value: curVal } = latestSelectionRef.current;
+    const selectedIdx = curOpts.findIndex((o) => o.value === curVal && !o.disabled);
+    const firstEnabled = curOpts.findIndex((o) => !o.disabled);
+    setHighlightedIndex(selectedIdx >= 0 ? selectedIdx : firstEnabled);
+  }, [open, computePosition]);
 
   useEffect(() => {
     if (!open) return;
@@ -154,7 +166,7 @@ export function SelectField<T extends string = string>({
       window.removeEventListener("scroll", handleReposition, true);
       window.removeEventListener("keydown", handleKeyGlobal);
     };
-  }, [open]);
+  }, [open, computePosition]);
 
   useEffect(() => {
     if (!open || highlightedIndex < 0) return;
