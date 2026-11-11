@@ -18,11 +18,6 @@ pub struct AppState {
 impl AppState {
     pub fn initialize() -> Result<Self, String> {
         let paths = AppPaths::resolve();
-        if let Some(env_file) = &paths.env_path {
-            let _ = dotenvy::from_path(env_file);
-        } else {
-            let _ = dotenvy::dotenv();
-        }
         paths
             .ensure_dirs()
             .map_err(|e| format!("Không tạo được thư mục dữ liệu: {e}"))?;
@@ -46,7 +41,6 @@ impl AppState {
     /// Resolve effective Gemini API key:
     /// 1. Explicit non-empty override from UI header
     /// 2. Saved `gemini_api_key` in SQLite `app_settings`
-    /// 3. `GEMINI_API_KEY` environment variable / `.env`
     pub fn resolve_api_key(&self, override_key: Option<&str>) -> String {
         if let Some(k) = override_key.map(str::trim).filter(|s| !s.is_empty()) {
             return k.to_string();
@@ -57,10 +51,7 @@ impl AppState {
                 return trimmed;
             }
         }
-        std::env::var("GEMINI_API_KEY")
-            .unwrap_or_default()
-            .trim()
-            .to_string()
+        String::new()
     }
 
     pub fn effective_export_dir(&self) -> PathBuf {

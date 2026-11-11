@@ -72,8 +72,8 @@ Tải bộ cài tương ứng với hệ điều hành tại trang **Releases** 
   - **Mặc định (App cài đặt):** Lưu `grader.db` và file xuất tại thư mục dữ liệu chuẩn của hệ điều
     hành (`%LOCALAPPDATA%\englishspeak\grader` trên Windows, `~/Library/Application Support/com.englishspeak.grader`
     trên macOS, `~/.local/share/com.englishspeak.grader` trên Linux).
-  - **Chế độ Portable:** Nếu đặt sẵn thư mục `data/` hoặc file `.env` cạnh file chạy, app sẽ đọc/ghi
-    dữ liệu ngay tại thư mục đó.
+  - **Chế độ Portable:** Nếu đặt sẵn thư mục `data/` cạnh file chạy, app sẽ đọc/ghi dữ liệu
+    (SQLite `data/grader.db` chứa cả API key, rubric, lịch sử) ngay tại thư mục đó.
 - **Quyền riêng tư:** App chạy hoàn toàn cục bộ. API key và video chỉ gửi trực tiếp tới **Google
   Gemini** để chấm điểm; video trên Gemini File API tự động hết hạn sau 48 giờ (app giữ cache 47 giờ
   trong phiên để chấm lại nhanh mà không cần upload lại).

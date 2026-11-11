@@ -135,9 +135,9 @@ impl UploadCache {
 
 pub fn validate_api_key(api_key: &str) -> Result<String> {
     let key = api_key.trim();
-    if key.is_empty() || key == "dan_key_cua_ban_vao_day" {
+    if key.is_empty() {
         return Err(GraderError::Gemini(
-            "Chưa có GEMINI_API_KEY. Lấy key miễn phí tại https://aistudio.google.com \
+            "Chưa có Gemini API key. Lấy key miễn phí tại https://aistudio.google.com \
              (Get API key), rồi dán vào ô API key hoặc phần Cài đặt."
                 .to_string(),
         ));

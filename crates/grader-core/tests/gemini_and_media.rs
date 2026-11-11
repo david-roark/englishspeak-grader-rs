@@ -62,7 +62,6 @@ fn test_model_filtering_and_ranking() {
 fn test_validate_api_key_guards() {
     assert!(validate_api_key("").is_err());
     assert!(validate_api_key("   ").is_err());
-    assert!(validate_api_key("dan_key_cua_ban_vao_day").is_err());
     assert_eq!(validate_api_key("  AIzaValid ").unwrap(), "AIzaValid");
 }
 

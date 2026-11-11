@@ -63,9 +63,7 @@ englishspeak-grader-rs/
    ```bash
    cd ui && npm install && cd ..
    ```
-2. *(Tùy chọn)* Tạo file `.env` ở thư mục gốc từ `.env.example` để app tự đọc `GEMINI_API_KEY` ở
-   chế độ Portable khi dev.
-3. Khởi chạy desktop app:
+2. Khởi chạy desktop app (API key có thể dán trực tiếp trên giao diện hoặc lưu trong **Cài đặt & Prompt** vào SQLite):
    ```bash
    cargo tauri dev
    ```

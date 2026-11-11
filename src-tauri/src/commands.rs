@@ -94,7 +94,7 @@ pub struct SettingsUpdate {
 
 fn mask_key(key: &str) -> String {
     let trimmed = key.trim();
-    if trimmed.is_empty() || trimmed == "dan_key_cua_ban_vao_day" {
+    if trimmed.is_empty() {
         return String::new();
     }
     let chars: Vec<char> = trimmed.chars().collect();
@@ -120,7 +120,7 @@ fn emit_progress(app: &AppHandle, task_id: &str, stage: impl Into<String>, perce
 #[tauri::command]
 pub fn get_bootstrap(state: State<'_, AppState>) -> Result<AppBootstrap, String> {
     let key = state.resolve_api_key(None);
-    let has_api_key = !key.is_empty() && key != "dan_key_cua_ban_vao_day";
+    let has_api_key = !key.is_empty();
     let default_model = state
         .db
         .get_setting("default_model")
@@ -891,10 +891,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn mask_key_hides_empty_placeholder_short_and_long_keys() {
+    fn mask_key_hides_empty_short_and_long_keys() {
         assert_eq!(mask_key(""), "");
         assert_eq!(mask_key("   "), "");
-        assert_eq!(mask_key("dan_key_cua_ban_vao_day"), "");
         assert_eq!(mask_key("abcd1234"), "••••••••");
         assert_eq!(mask_key("AIzaSyDummyKey123456"), "AIza••••3456");
     }
