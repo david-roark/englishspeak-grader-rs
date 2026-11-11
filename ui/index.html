@@ -4,8 +4,40 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>EnglishSpeak Grader — Chấm bài nói tiếng Anh bằng AI</title>
+    <script>
+      (function () {
+        try {
+          var raw = localStorage.getItem("englishspeak_grader_theme");
+          var parsed = raw ? JSON.parse(raw) : {};
+          var mode =
+            parsed.mode === "light" ||
+            parsed.mode === "dark" ||
+            parsed.mode === "system"
+              ? parsed.mode
+              : "system";
+          var validAccents = ["indigo", "sky", "emerald", "violet", "rose", "amber"];
+          var accent =
+            validAccents.indexOf(parsed.accent) !== -1
+              ? parsed.accent
+              : "indigo";
+          var prefersDark =
+            window.matchMedia &&
+            window.matchMedia("(prefers-color-scheme: dark)").matches;
+          var resolved =
+            mode === "system" ? (prefersDark ? "dark" : "light") : mode;
+          var root = document.documentElement;
+          root.dataset.theme = resolved;
+          root.dataset.themeMode = mode;
+          root.dataset.accent = accent;
+          root.style.colorScheme = resolved;
+        } catch (e) {
+          document.documentElement.dataset.theme = "light";
+          document.documentElement.dataset.accent = "indigo";
+        }
+      })();
+    </script>
   </head>
-  <body class="bg-slate-50 text-slate-900 antialiased">
+  <body class="antialiased">
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

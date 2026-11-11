@@ -1,7 +1,28 @@
 import { useState } from "react";
-import { FolderOpen, RotateCcw, Save } from "lucide-react";
+import {
+  Check,
+  FolderOpen,
+  Monitor,
+  Moon,
+  Palette,
+  RotateCcw,
+  Save,
+  Sun,
+} from "lucide-react";
 import { api, LANG_LABELS, MEDIA_RES_OPTIONS, TASK_LABELS } from "../lib/api";
+import {
+  THEME_ACCENTS,
+  THEME_MODES,
+  useTheme,
+  type ThemeMode,
+} from "../lib/theme";
 import type { AppBootstrap, PromptProfile } from "../lib/types";
+
+const MODE_ICON_MAP: Record<ThemeMode, typeof Sun> = {
+  system: Monitor,
+  light: Sun,
+  dark: Moon,
+};
 
 interface SettingsPageProps {
   bootstrap: AppBootstrap;
@@ -12,6 +33,9 @@ export function SettingsPage({
   bootstrap,
   onBootstrapUpdated,
 }: SettingsPageProps) {
+  const { mode, accent, resolvedMode, setMode, setAccent, resetTheme } =
+    useTheme();
+
   // App settings state
   const [apiKeyDraft, setApiKeyDraft] = useState("");
   const [defaultModel, setDefaultModel] = useState(bootstrap.default_model);
@@ -86,6 +110,146 @@ export function SettingsPage({
 
   return (
     <div className="space-y-6">
+      {/* Theme & Appearance Settings */}
+      <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-xs">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h2 className="flex items-center gap-2 text-base font-bold text-slate-900">
+              <Palette className="h-4 w-4 text-indigo-600" />
+              Giao diện &amp; Theme
+            </h2>
+            <p className="mt-1 text-xs text-slate-500">
+              Tùy chỉnh chế độ Sáng / Tối và bảng màu chủ đạo. Thay đổi áp dụng ngay lập tức và được lưu tự động trên máy.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={resetTheme}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+          >
+            <RotateCcw className="h-3.5 w-3.5" />
+            Mặc định
+          </button>
+        </div>
+
+        <div className="mt-4">
+          <div className="text-xs font-semibold text-slate-600">
+            Chế độ hiển thị{" "}
+            {mode === "system" && (
+              <span className="font-normal text-slate-500">
+                (Hệ thống đang dùng:{" "}
+                {resolvedMode === "dark" ? "Tối" : "Sáng"})
+              </span>
+            )}
+          </div>
+          <div className="mt-2 grid gap-2.5 sm:grid-cols-3">
+            {THEME_MODES.map((item) => {
+              const Icon = MODE_ICON_MAP[item.id];
+              const selected = mode === item.id;
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => setMode(item.id)}
+                  className={`flex items-start gap-3 rounded-xl border p-3 text-left transition ${
+                    selected
+                      ? "border-indigo-400 bg-indigo-50/70"
+                      : "border-slate-200 hover:bg-slate-50"
+                  }`}
+                >
+                  <div
+                    className={`mt-0.5 rounded-lg p-2 ${
+                      selected
+                        ? "bg-indigo-600 text-white"
+                        : "bg-slate-100 text-slate-600"
+                    }`}
+                  >
+                    <Icon className="h-4 w-4" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center justify-between gap-1">
+                      <span className="text-sm font-semibold text-slate-900">
+                        {item.label}
+                      </span>
+                      {selected && (
+                        <Check className="h-4 w-4 shrink-0 text-indigo-600" />
+                      )}
+                    </div>
+                    <p className="mt-0.5 text-xs text-slate-500">
+                      {item.description}
+                    </p>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="mt-5">
+          <div className="text-xs font-semibold text-slate-600">
+            Bảng màu chủ đạo
+          </div>
+          <div className="mt-2 grid gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
+            {THEME_ACCENTS.map((item) => {
+              const selected = accent === item.id;
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => setAccent(item.id)}
+                  className={`flex items-center justify-between rounded-xl border px-3.5 py-2.5 text-left transition ${
+                    selected
+                      ? "border-indigo-400 bg-indigo-50/70"
+                      : "border-slate-200 hover:bg-slate-50"
+                  }`}
+                >
+                  <div className="flex items-center gap-3">
+                    <span
+                      className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-black/10"
+                      style={{ backgroundColor: item.swatch }}
+                    >
+                      {selected && <Check className="h-3.5 w-3.5 text-white" />}
+                    </span>
+                    <div>
+                      <div className="text-sm font-semibold text-slate-900">
+                        {item.label}
+                      </div>
+                      <div className="text-xs text-slate-500">
+                        {item.description}
+                      </div>
+                    </div>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Live Theme Preview */}
+        <div className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+          <div className="flex flex-wrap items-center gap-2 text-xs">
+            <span className="font-semibold text-slate-700">Xem trước:</span>
+            <span className="rounded-full bg-indigo-50 px-2.5 py-0.5 font-medium text-indigo-700">
+              Nhãn nổi bật
+            </span>
+            <span className="rounded-full bg-emerald-50 px-2.5 py-0.5 font-medium text-emerald-700">
+              Trạng thái tốt
+            </span>
+            <span className="rounded-full bg-amber-50 px-2.5 py-0.5 font-medium text-amber-800">
+              Cảnh báo
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="rounded-lg border border-indigo-200 bg-white px-2.5 py-1 text-xs font-semibold text-indigo-700">
+              Nút phụ
+            </span>
+            <span className="rounded-lg bg-indigo-600 px-3 py-1 text-xs font-bold text-white">
+              Nút chính
+            </span>
+          </div>
+        </div>
+      </div>
+
       {/* System & API Settings */}
       <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-xs">
         <h2 className="text-base font-bold text-slate-900">

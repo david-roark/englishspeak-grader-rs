@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { api, MEDIA_RES_OPTIONS } from "./lib/api";
 import type { AppBootstrap } from "./lib/types";
+import { ThemeSwitcher } from "./components/ThemeSwitcher";
 import { GradePage } from "./pages/GradePage";
 import { HistoryPage } from "./pages/HistoryPage";
 import { MediaToolsPage } from "./pages/MediaToolsPage";
@@ -130,6 +131,7 @@ export function App() {
                   ? `API Key: ${bootstrap.masked_api_key}`
                   : "Chưa có API Key"}
               </span>
+              <ThemeSwitcher />
             </div>
           </div>
 
