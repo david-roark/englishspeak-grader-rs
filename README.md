@@ -46,7 +46,7 @@ Tải bộ cài tương ứng với hệ điều hành tại trang [**Releases**
 | **macOS** | `.dmg` (Apple Silicon / Intel) | Nếu báo nhà phát triển chưa xác định: chuột phải vào app → **Open → Open** |
 | **Linux** | `.AppImage` hoặc `.deb` | Với `.AppImage`: cấp quyền chạy (`chmod +x *.AppImage`) trước khi mở |
 
-> **Lưu ý về FFmpeg:** Nếu dùng bản chưa nhúng sẵn `ffmpeg`, hãy cài `ffmpeg` vào hệ thống (`PATH`) hoặc trỏ đường dẫn tới file `ffmpeg` trong tab **Cài đặt & Prompt** để dùng các công cụ nén, tách MP3, cắt và tắt tiếng video.
+> **Về FFmpeg:** Các bản cài đặt phát hành trên [**Releases**](https://github.com/david-roark/englishspeak-grader-rs/releases) đã **nhúng sẵn `ffmpeg`**, có thể dùng ngay các tính năng nén video, tách MP3, cắt đoạn và tắt tiếng mà không cần cài thêm. (Nếu tự build không kèm sidecar hoặc muốn dùng bản riêng, bạn có thể trỏ đường dẫn `ffmpeg` trong tab **Cài đặt & Prompt**.)
 
 ### 2. Quy trình chấm bài nhanh
 
