@@ -33,7 +33,11 @@ pub fn run() {
             commands::export_assessment_excel,
             commands::get_assessment_markdown,
             commands::save_prompt_profile,
+            commands::clone_prompt_profile,
+            commands::delete_prompt_profile,
+            commands::set_active_prompt_profile,
             commands::reset_prompt_profile,
+            commands::preview_grading_prompt,
             commands::save_settings,
         ])
         .run(tauri::generate_context!())

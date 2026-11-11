@@ -10,6 +10,7 @@ import type {
   GradeResponse,
   MediaOutput,
   ProgressPayload,
+  PromptParts,
   PromptProfile,
   Rubric,
 } from "./types";
@@ -52,6 +53,7 @@ export const api = {
     student_names_raw: string;
     extra_instructions: string;
     media_resolution: string;
+    prompt_profile_id?: string;
   }) => invoke<GradeResponse>("grade_video_cmd", { req }),
 
   compressVideo: (params: {
@@ -153,10 +155,45 @@ export const api = {
   getAssessmentMarkdown: (assessmentId: number) =>
     invoke<string>("get_assessment_markdown", { assessmentId }),
 
-  savePromptProfile: (profile: PromptProfile) =>
-    invoke<PromptProfile>("save_prompt_profile", { profile }),
+  savePromptProfile: (profile: PromptProfile, setActive = false) =>
+    invoke<AppBootstrap>("save_prompt_profile", {
+      profile,
+      setActive,
+    }),
+  clonePromptProfile: (
+    sourceId: string,
+    newId: string,
+    newName: string,
+    setActive = true
+  ) =>
+    invoke<AppBootstrap>("clone_prompt_profile", {
+      sourceId,
+      newId,
+      newName,
+      setActive,
+    }),
+  deletePromptProfile: (id: string) =>
+    invoke<AppBootstrap>("delete_prompt_profile", { id }),
+  setActivePromptProfile: (id: string) =>
+    invoke<AppBootstrap>("set_active_prompt_profile", { id }),
   resetPromptProfile: () =>
-    invoke<PromptProfile>("reset_prompt_profile"),
+    invoke<AppBootstrap>("reset_prompt_profile"),
+  previewGradingPrompt: (params: {
+    profile: PromptProfile;
+    rubricId: string;
+    taskType: string;
+    feedbackLang: string;
+    studentNamesRaw: string;
+    extraInstructions: string;
+  }) =>
+    invoke<PromptParts>("preview_grading_prompt", {
+      profile: params.profile,
+      rubricId: params.rubricId,
+      taskType: params.taskType,
+      feedbackLang: params.feedbackLang,
+      studentNamesRaw: params.studentNamesRaw,
+      extraInstructions: params.extraInstructions,
+    }),
 
   saveSettings: (settings: {
     api_key?: string;

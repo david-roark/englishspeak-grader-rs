@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   ChevronDown,
   ChevronRight,
@@ -18,6 +18,7 @@ import type {
   AppBootstrap,
   AssessmentDetail,
   FileInfo,
+  PromptProfile,
   Rubric,
   VideoPreset,
 } from "../lib/types";
@@ -27,6 +28,8 @@ interface GradePageProps {
   model: string;
   mediaResolution: string;
   rubrics: Rubric[];
+  promptProfiles: PromptProfile[];
+  activePromptProfileId: string;
   videoPresets: VideoPreset[];
   ffmpegAvailable: boolean;
   exportDir: string;
@@ -50,6 +53,8 @@ export function GradePage({
   model,
   mediaResolution,
   rubrics,
+  promptProfiles,
+  activePromptProfileId,
   videoPresets,
   ffmpegAvailable,
   exportDir,
@@ -67,7 +72,16 @@ export function GradePage({
   const [compressing, setCompressing] = useState(false);
 
   const [rubricId, setRubricId] = useState(rubrics[0]?.id ?? "ielts_speaking");
+  const [promptProfileId, setPromptProfileId] = useState(
+    activePromptProfileId || "default"
+  );
   const [taskType, setTaskType] = useState("presentation");
+
+  useEffect(() => {
+    if (promptProfiles.some((p) => p.id === activePromptProfileId)) {
+      setPromptProfileId(activePromptProfileId);
+    }
+  }, [activePromptProfileId, promptProfiles]);
   const [feedbackLang, setFeedbackLang] = useState("vi");
   const [studentNames, setStudentNames] = useState("");
   const [extraInstructions, setExtraInstructions] = useState("");
@@ -199,6 +213,7 @@ export function GradePage({
         student_names_raw: studentNames,
         extra_instructions: extraInstructions,
         media_resolution: mediaResolution,
+        prompt_profile_id: promptProfileId,
       });
       setResultDetail(resp.detail);
       setExcelPath(resp.excel_path);
@@ -373,6 +388,33 @@ export function GradePage({
               ariaLabel="Rubric tiêu chuẩn chấm"
             />
           </div>
+
+          {promptProfiles.length > 0 && (
+            <div>
+              <label className="block text-xs font-semibold text-slate-600">
+                Cấu hình Prompt
+              </label>
+              <SelectField
+                value={promptProfileId}
+                onChange={setPromptProfileId}
+                options={promptProfiles.map((p) => ({
+                  value: p.id,
+                  label: p.name,
+                  badge:
+                    p.id === activePromptProfileId
+                      ? "Mặc định"
+                      : p.strictness === "strict"
+                      ? "Khắt khe"
+                      : p.strictness === "encouraging"
+                      ? "Khuyến khích"
+                      : "Tiêu chuẩn",
+                }))}
+                size="sm"
+                className="mt-1 w-full"
+                ariaLabel="Chọn cấu hình Prompt"
+              />
+            </div>
+          )}
 
           <div className="grid grid-cols-2 gap-2.5">
             <div>

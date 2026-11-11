@@ -9,7 +9,8 @@ import {
   Save,
   Sun,
 } from "lucide-react";
-import { api, LANG_LABELS, MEDIA_RES_OPTIONS, TASK_LABELS } from "../lib/api";
+import { api, MEDIA_RES_OPTIONS } from "../lib/api";
+import { PromptConfigSection } from "../components/PromptConfigSection";
 import { SelectField } from "../components/SelectField";
 import {
   THEME_ACCENTS,
@@ -17,7 +18,7 @@ import {
   useTheme,
   type ThemeMode,
 } from "../lib/theme";
-import type { AppBootstrap, PromptProfile } from "../lib/types";
+import type { AppBootstrap } from "../lib/types";
 
 const MODE_ICON_MAP: Record<ThemeMode, typeof Sun> = {
   system: Monitor,
@@ -46,14 +47,6 @@ export function SettingsPage({
   const [settingsMsg, setSettingsMsg] = useState("");
   const [settingsErr, setSettingsErr] = useState("");
 
-  // Prompt profile state
-  const [profile, setProfile] = useState<PromptProfile>(bootstrap.prompt_profile);
-  const [rulesText, setRulesText] = useState(
-    bootstrap.prompt_profile.grading_rules.join("\n")
-  );
-  const [promptMsg, setPromptMsg] = useState("");
-  const [promptErr, setPromptErr] = useState("");
-
   async function handleSaveAppSettings(clearKey = false) {
     setSettingsMsg("");
     setSettingsErr("");
@@ -71,41 +64,6 @@ export function SettingsPage({
       setSettingsMsg("✅ Đã lưu cài đặt ứng dụng.");
     } catch (e) {
       setSettingsErr(String(e));
-    }
-  }
-
-  async function handleSavePrompt() {
-    setPromptMsg("");
-    setPromptErr("");
-    const rules = rulesText
-      .split("\n")
-      .map((s) => s.trim())
-      .filter(Boolean);
-    try {
-      const saved = await api.savePromptProfile({
-        ...profile,
-        grading_rules: rules,
-      });
-      setProfile(saved);
-      setRulesText(saved.grading_rules.join("\n"));
-      onBootstrapUpdated({ ...bootstrap, prompt_profile: saved });
-      setPromptMsg("✅ Đã lưu cấu hình prompt! Áp dụng ngay cho lần chấm tiếp theo.");
-    } catch (e) {
-      setPromptErr(String(e));
-    }
-  }
-
-  async function handleResetPrompt() {
-    setPromptMsg("");
-    setPromptErr("");
-    try {
-      const reset = await api.resetPromptProfile();
-      setProfile(reset);
-      setRulesText(reset.grading_rules.join("\n"));
-      onBootstrapUpdated({ ...bootstrap, prompt_profile: reset });
-      setPromptMsg("🔄 Đã khôi phục cấu hình prompt về mặc định.");
-    } catch (e) {
-      setPromptErr(String(e));
     }
   }
 
@@ -395,158 +353,10 @@ export function SettingsPage({
       </div>
 
       {/* Prompt Profile Editor */}
-      <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-xs">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div>
-            <h2 className="text-base font-bold text-slate-900">
-              Cấu hình Prompt gửi Gemini AI
-            </h2>
-            <p className="mt-0.5 text-xs text-slate-500">
-              Tùy chỉnh vai trò AI, yêu cầu chấm bài và hướng dẫn theo từng loại bài / ngôn ngữ.
-            </p>
-          </div>
-          <div className="flex gap-2">
-            <button
-              type="button"
-              onClick={handleResetPrompt}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50"
-            >
-              <RotateCcw className="h-3.5 w-3.5" />
-              Khôi phục mặc định
-            </button>
-            <button
-              type="button"
-              onClick={handleSavePrompt}
-              className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-4 py-2 text-xs font-bold text-white hover:bg-indigo-700"
-            >
-              <Save className="h-3.5 w-3.5" />
-              Lưu cấu hình prompt
-            </button>
-          </div>
-        </div>
-
-        {promptErr && (
-          <div className="mt-3 rounded bg-rose-50 px-3 py-2 text-xs text-rose-700">
-            ⚠️ {promptErr}
-          </div>
-        )}
-        {promptMsg && (
-          <div className="mt-3 rounded bg-emerald-50 px-3 py-2 text-xs text-emerald-700">
-            {promptMsg}
-          </div>
-        )}
-
-        <div className="mt-4 grid gap-4 md:grid-cols-2">
-          <div className="space-y-3">
-            <div>
-              <label className="block text-xs font-semibold text-slate-600">
-                Vai trò &amp; Nhiệm vụ của AI (System Instruction)
-              </label>
-              <textarea
-                rows={3}
-                value={profile.system_instruction}
-                onChange={(e) =>
-                  setProfile({ ...profile, system_instruction: e.target.value })
-                }
-                className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-slate-600">
-                Chỉ dẫn khi có danh sách tên học sinh (biến {"{names}"})
-              </label>
-              <textarea
-                rows={2}
-                value={profile.names_with_list}
-                onChange={(e) =>
-                  setProfile({ ...profile, names_with_list: e.target.value })
-                }
-                className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-slate-600">
-                Chỉ dẫn khi AI tự phát hiện tên học sinh
-              </label>
-              <textarea
-                rows={3}
-                value={profile.names_auto_detect}
-                onChange={(e) =>
-                  setProfile({ ...profile, names_auto_detect: e.target.value })
-                }
-                className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-slate-600">
-                Yêu cầu chấm bài chi tiết (mỗi dòng 1 yêu cầu, hỗ trợ {"{lang_instr}"})
-              </label>
-              <textarea
-                rows={7}
-                value={rulesText}
-                onChange={(e) => setRulesText(e.target.value)}
-                className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
-              />
-            </div>
-          </div>
-
-          <div className="space-y-4">
-            <div className="space-y-2.5">
-              <h3 className="text-xs font-bold uppercase tracking-wide text-slate-600">
-                Mô tả theo Loại bài nói
-              </h3>
-              {Object.entries(TASK_LABELS).map(([k, label]) => (
-                <div key={k}>
-                  <label className="block text-xs font-medium text-slate-600">
-                    {label}
-                  </label>
-                  <input
-                    type="text"
-                    value={profile.task_types[k] ?? ""}
-                    onChange={(e) =>
-                      setProfile({
-                        ...profile,
-                        task_types: { ...profile.task_types, [k]: e.target.value },
-                      })
-                    }
-                    className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-1.5 text-sm"
-                  />
-                </div>
-              ))}
-            </div>
-
-            <div className="space-y-2.5">
-              <h3 className="text-xs font-bold uppercase tracking-wide text-slate-600">
-                Chỉ dẫn theo Ngôn ngữ nhận xét
-              </h3>
-              {Object.entries(LANG_LABELS).map(([k, label]) => (
-                <div key={k}>
-                  <label className="block text-xs font-medium text-slate-600">
-                    {label}
-                  </label>
-                  <input
-                    type="text"
-                    value={profile.feedback_languages[k] ?? ""}
-                    onChange={(e) =>
-                      setProfile({
-                        ...profile,
-                        feedback_languages: {
-                          ...profile.feedback_languages,
-                          [k]: e.target.value,
-                        },
-                      })
-                    }
-                    className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-1.5 text-sm"
-                  />
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      </div>
+      <PromptConfigSection
+        bootstrap={bootstrap}
+        onBootstrapUpdated={onBootstrapUpdated}
+      />
     </div>
   );
 }

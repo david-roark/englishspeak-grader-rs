@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use grader_core::prompts::{build_grading_prompt, merge_with_default, PromptProfile};
+use grader_core::prompts::{build_grading_prompt, build_prompt_parts, merge_with_default, PromptProfile};
 use grader_core::rubrics::{
     builtin_rubrics, format_result_markdown, get_builtin_rubric, Criterion, Rubric,
 };
@@ -168,12 +168,30 @@ fn test_merge_with_default_restores_missing_fields() {
         grading_rules: vec![],
         task_types: BTreeMap::new(),
         feedback_languages: BTreeMap::new(),
+        temperature: 2.5,
+        strictness: "invalid".into(),
     };
     let merged = merge_with_default(partial);
     assert_eq!(merged.system_instruction, "Custom sys");
     assert!(!merged.names_with_list.is_empty());
     assert!(merged.task_types.contains_key("presentation"));
     assert!(merged.feedback_languages.contains_key("bilingual"));
+    assert_eq!(merged.temperature, 1.0);
+    assert_eq!(merged.strictness, "standard");
+
+    let mut strict_profile = PromptProfile::default();
+    strict_profile.strictness = "strict".into();
+    let parts = build_prompt_parts(
+        &strict_profile,
+        get_builtin_rubric("ielts_speaking").unwrap(),
+        "qa",
+        "en",
+        Some(&["Minh".into()]),
+        "",
+    );
+    assert!(parts.system_instruction.contains("giám khảo"));
+    assert!(!parts.user_prompt.contains(&parts.system_instruction));
+    assert!(parts.user_prompt.contains("Khắt khe chuẩn thi cử"));
 }
 
 #[test]

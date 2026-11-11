@@ -21,7 +21,7 @@ pub use media::{
     DEFAULT_VIDEO_PRESET,
 };
 pub use paths::AppPaths;
-pub use prompts::{build_grading_prompt, PromptProfile};
+pub use prompts::{build_grading_prompt, build_prompt_parts, PromptParts, PromptProfile};
 pub use rubrics::{
     builtin_rubrics, fmt_num, format_result_markdown, get_builtin_rubric, Criterion, Rubric,
 };

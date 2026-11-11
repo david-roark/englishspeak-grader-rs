@@ -235,6 +235,14 @@ async fn test_grade_video_success_and_errors() {
     Mock::given(method("POST"))
         .and(path("/v1beta/models/gemini-flash-lite-latest:generateContent"))
         .and(query_param("key", "test-key"))
+        .and(wiremock::matchers::body_partial_json(json!({
+            "systemInstruction": {
+                "parts": [{ "text": PromptProfile::default().system_instruction }]
+            },
+            "generationConfig": {
+                "temperature": 0.25
+            }
+        })))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "candidates": [{
                 "content": {

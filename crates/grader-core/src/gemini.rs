@@ -14,7 +14,7 @@ use tokio_util::io::ReaderStream;
 use tokio_util::sync::CancellationToken;
 
 use crate::error::{GraderError, Result};
-use crate::prompts::{build_grading_prompt, PromptProfile};
+use crate::prompts::{build_prompt_parts, PromptProfile};
 use crate::rubrics::Rubric;
 use crate::schemas::{assessment_result_gemini_schema, AssessmentResult};
 
@@ -571,7 +571,7 @@ impl GeminiClient {
     ) -> Result<AssessmentResult> {
         check_cancelled(cancel)?;
 
-        let prompt = build_grading_prompt(
+        let prompt_parts = build_prompt_parts(
             prompt_profile,
             rubric,
             task_type,
@@ -586,7 +586,13 @@ impl GeminiClient {
             self.base_url, model_id, self.api_key
         );
 
-        let body = json!({
+        let temperature = if prompt_profile.temperature.is_finite() {
+            prompt_profile.temperature.clamp(0.0, 1.0)
+        } else {
+            0.25
+        };
+
+        let mut body = json!({
             "contents": [{
                 "role": "user",
                 "parts": [
@@ -596,16 +602,21 @@ impl GeminiClient {
                             "mimeType": uploaded.mime_type
                         }
                     },
-                    { "text": prompt }
+                    { "text": prompt_parts.user_prompt }
                 ]
             }],
             "generationConfig": {
-                "temperature": 0.4,
+                "temperature": temperature,
                 "responseMimeType": "application/json",
                 "responseJsonSchema": assessment_result_gemini_schema(),
                 "mediaResolution": media_resolution.as_api_str()
             }
         });
+        if !prompt_parts.system_instruction.is_empty() {
+            body["systemInstruction"] = json!({
+                "parts": [{ "text": prompt_parts.system_instruction }]
+            });
+        }
 
         let req_fut = self
             .http

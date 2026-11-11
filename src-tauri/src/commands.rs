@@ -3,10 +3,10 @@ use std::time::{Duration, Instant};
 
 use grader_core::export::{default_export_path, export_to_excel};
 use grader_core::{
-    compress_video_to, extract_mp3_to, format_result_markdown, mp3_presets, mute_video_to,
-    probe_duration_secs, resolve_ffmpeg, trim_media_to, video_presets, AssessmentDetail,
-    AssessmentSummary, GeminiClient, MediaResolution, Mp3Preset, NewAssessment, PromptProfile,
-    Rubric, VideoPreset, DEFAULT_MODEL, FALLBACK_MODELS,
+    build_prompt_parts, compress_video_to, extract_mp3_to, format_result_markdown, mp3_presets,
+    mute_video_to, probe_duration_secs, resolve_ffmpeg, trim_media_to, video_presets,
+    AssessmentDetail, AssessmentSummary, GeminiClient, MediaResolution, Mp3Preset, NewAssessment,
+    PromptParts, PromptProfile, Rubric, VideoPreset, DEFAULT_MODEL, FALLBACK_MODELS,
 };
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State};
@@ -30,6 +30,8 @@ pub struct AppBootstrap {
     pub mp3_presets: Vec<Mp3Preset>,
     pub rubrics: Vec<Rubric>,
     pub prompt_profile: PromptProfile,
+    pub prompt_profiles: Vec<PromptProfile>,
+    pub active_prompt_profile_id: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -52,6 +54,7 @@ pub struct GradeRequest {
     pub student_names_raw: String,
     pub extra_instructions: String,
     pub media_resolution: String,
+    pub prompt_profile_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -140,6 +143,8 @@ pub fn get_bootstrap(state: State<'_, AppState>) -> Result<AppBootstrap, String>
 
     let rubrics = state.db.list_rubrics().map_err(|e| e.to_string())?;
     let prompt_profile = state.db.load_prompt_profile().map_err(|e| e.to_string())?;
+    let prompt_profiles = state.db.list_prompt_profiles().map_err(|e| e.to_string())?;
+    let active_prompt_profile_id = prompt_profile.id.clone();
 
     Ok(AppBootstrap {
         has_api_key,
@@ -157,7 +162,17 @@ pub fn get_bootstrap(state: State<'_, AppState>) -> Result<AppBootstrap, String>
         mp3_presets: mp3_presets().to_vec(),
         rubrics,
         prompt_profile,
+        prompt_profiles,
+        active_prompt_profile_id,
     })
+}
+
+fn parse_student_names(raw: &str) -> Vec<String> {
+    raw.split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(String::from)
+        .collect()
 }
 
 #[tauri::command]
@@ -213,18 +228,24 @@ pub async fn grade_video_cmd(
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("Không tìm thấy rubric '{}'.", req.rubric_id))?;
 
-    let prompt_profile = state.db.load_prompt_profile().map_err(|e| e.to_string())?;
+    let prompt_profile = match req
+        .prompt_profile_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        Some(pid) => state
+            .db
+            .get_prompt_profile(pid)
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| format!("Không tìm thấy Prompt Profile '{pid}'."))?,
+        None => state.db.load_prompt_profile().map_err(|e| e.to_string())?,
+    };
 
     let key = state.resolve_api_key(req.api_key.as_deref());
     let client = GeminiClient::new(&key).map_err(|e| e.to_string())?;
 
-    let student_names: Vec<String> = req
-        .student_names_raw
-        .split(',')
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .map(String::from)
-        .collect();
+    let student_names = parse_student_names(&req.student_names_raw);
     let names_opt = (!student_names.is_empty()).then_some(student_names.as_slice());
 
     let cancel = state.register_task(&req.task_id).await;
@@ -641,17 +662,100 @@ pub fn get_assessment_markdown(state: State<'_, AppState>, assessment_id: i64) -
 pub fn save_prompt_profile(
     state: State<'_, AppState>,
     profile: PromptProfile,
-) -> Result<PromptProfile, String> {
+    set_active: Option<bool>,
+) -> Result<AppBootstrap, String> {
     state
         .db
         .save_prompt_profile(&profile)
         .map_err(|e| e.to_string())?;
-    state.db.load_prompt_profile().map_err(|e| e.to_string())
+    if set_active.unwrap_or(false) {
+        state
+            .db
+            .set_active_prompt_profile(profile.id.trim())
+            .map_err(|e| e.to_string())?;
+    }
+    get_bootstrap(state)
 }
 
 #[tauri::command]
-pub fn reset_prompt_profile(state: State<'_, AppState>) -> Result<PromptProfile, String> {
-    state.db.reset_prompt_profile().map_err(|e| e.to_string())
+pub fn clone_prompt_profile(
+    state: State<'_, AppState>,
+    source_id: String,
+    new_id: String,
+    new_name: String,
+    set_active: Option<bool>,
+) -> Result<AppBootstrap, String> {
+    let created = state
+        .db
+        .clone_prompt_profile(&source_id, &new_id, &new_name)
+        .map_err(|e| e.to_string())?;
+    if set_active.unwrap_or(true) {
+        state
+            .db
+            .set_active_prompt_profile(&created.id)
+            .map_err(|e| e.to_string())?;
+    }
+    get_bootstrap(state)
+}
+
+#[tauri::command]
+pub fn delete_prompt_profile(
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<AppBootstrap, String> {
+    state
+        .db
+        .delete_prompt_profile(&id)
+        .map_err(|e| e.to_string())?;
+    get_bootstrap(state)
+}
+
+#[tauri::command]
+pub fn set_active_prompt_profile(
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<AppBootstrap, String> {
+    state
+        .db
+        .set_active_prompt_profile(&id)
+        .map_err(|e| e.to_string())?;
+    get_bootstrap(state)
+}
+
+#[tauri::command]
+pub fn reset_prompt_profile(state: State<'_, AppState>) -> Result<AppBootstrap, String> {
+    state
+        .db
+        .reset_prompt_profile()
+        .map_err(|e| e.to_string())?;
+    get_bootstrap(state)
+}
+
+#[tauri::command]
+pub fn preview_grading_prompt(
+    state: State<'_, AppState>,
+    profile: PromptProfile,
+    rubric_id: String,
+    task_type: String,
+    feedback_lang: String,
+    student_names_raw: String,
+    extra_instructions: String,
+) -> Result<PromptParts, String> {
+    let rubric = state
+        .db
+        .get_rubric(&rubric_id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| format!("Không tìm thấy rubric '{rubric_id}'."))?;
+    let student_names = parse_student_names(&student_names_raw);
+    let names_opt = (!student_names.is_empty()).then_some(student_names.as_slice());
+    Ok(build_prompt_parts(
+        &profile,
+        &rubric,
+        &task_type,
+        &feedback_lang,
+        names_opt,
+        &extra_instructions,
+    ))
 }
 
 #[tauri::command]

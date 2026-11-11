@@ -139,11 +139,25 @@ fn test_prompt_profile_save_and_reset() {
 
     let mut p = db.load_prompt_profile().unwrap();
     p.system_instruction = "Custom instruction".into();
+    p.temperature = 0.15;
+    p.strictness = "strict".into();
     db.save_prompt_profile(&p).unwrap();
-    assert_eq!(
-        db.load_prompt_profile().unwrap().system_instruction,
-        "Custom instruction"
-    );
+    let loaded = db.load_prompt_profile().unwrap();
+    assert_eq!(loaded.system_instruction, "Custom instruction");
+    assert!((loaded.temperature - 0.15).abs() < 1e-5);
+    assert_eq!(loaded.strictness, "strict");
+
+    let cloned = db
+        .clone_prompt_profile("default", "ielts_strict", "IELTS Khắt khe")
+        .unwrap();
+    assert_eq!(cloned.id, "ielts_strict");
+    db.set_active_prompt_profile("ielts_strict").unwrap();
+    assert_eq!(db.active_prompt_profile_id().unwrap(), "ielts_strict");
+    assert!(db.list_prompt_profiles().unwrap().len() >= 2);
+    assert!(db.delete_prompt_profile("default").is_err());
+
+    db.delete_prompt_profile("ielts_strict").unwrap();
+    assert_eq!(db.active_prompt_profile_id().unwrap(), "default");
 
     let reset = db.reset_prompt_profile().unwrap();
     assert_eq!(reset, PromptProfile::default());

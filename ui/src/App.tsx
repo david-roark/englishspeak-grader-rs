@@ -279,6 +279,8 @@ export function App() {
             model={selectedModel}
             mediaResolution={mediaRes}
             rubrics={bootstrap.rubrics}
+            promptProfiles={bootstrap.prompt_profiles}
+            activePromptProfileId={bootstrap.active_prompt_profile_id}
             videoPresets={bootstrap.video_presets}
             ffmpegAvailable={Boolean(bootstrap.ffmpeg_path)}
             exportDir={bootstrap.export_dir}

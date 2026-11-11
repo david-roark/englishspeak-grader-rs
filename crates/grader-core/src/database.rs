@@ -6,7 +6,9 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
 use crate::error::{GraderError, Result};
-use crate::prompts::{merge_with_default, PromptProfile};
+use crate::prompts::{
+    default_strictness, default_temperature, merge_with_default, PromptProfile,
+};
 use crate::rubrics::{builtin_rubrics, Criterion, Rubric};
 use crate::schemas::{AssessmentResult, CriterionScore, Evidence, StudentAssessment};
 
@@ -154,6 +156,8 @@ impl Database {
                 grading_rules_json  TEXT NOT NULL,
                 task_types_json     TEXT NOT NULL,
                 feedback_langs_json TEXT NOT NULL,
+                temperature         REAL NOT NULL DEFAULT 0.25,
+                strictness          TEXT NOT NULL DEFAULT 'standard',
                 updated_at          TEXT NOT NULL
             );
 
@@ -216,6 +220,8 @@ impl Database {
             PRAGMA user_version = 1;
             "#,
         )?;
+
+        ensure_prompt_profile_columns(&conn)?;
 
         let tx = conn.transaction()?;
         let now = now_iso();
@@ -447,56 +453,118 @@ impl Database {
     // Prompt Profiles
     // --------------------------------------------------------------------- //
 
-    pub fn load_prompt_profile(&self) -> Result<PromptProfile> {
+    pub fn active_prompt_profile_id(&self) -> Result<String> {
+        let id = self
+            .get_setting("active_prompt_profile_id")?
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| "default".to_string());
+        Ok(id)
+    }
+
+    pub fn list_prompt_profiles(&self) -> Result<Vec<PromptProfile>> {
         let conn = self.connect()?;
-        let row = conn
-            .query_row(
-                "SELECT id, name, system_instruction, names_with_list, names_auto_detect,
-                        grading_rules_json, task_types_json, feedback_langs_json
-                 FROM prompt_profiles WHERE id = 'default'",
-                [],
-                |row| {
-                    Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, String>(1)?,
-                        row.get::<_, String>(2)?,
-                        row.get::<_, String>(3)?,
-                        row.get::<_, String>(4)?,
-                        row.get::<_, String>(5)?,
-                        row.get::<_, String>(6)?,
-                        row.get::<_, String>(7)?,
-                    ))
-                },
-            )
-            .optional()?;
+        let mut stmt = conn.prepare(
+            "SELECT id, name, system_instruction, names_with_list, names_auto_detect,
+                    grading_rules_json, task_types_json, feedback_langs_json,
+                    temperature, strictness
+             FROM prompt_profiles
+             ORDER BY CASE WHEN id = 'default' THEN 0 ELSE 1 END, name ASC, id ASC",
+        )?;
+        let rows = stmt.query_map([], map_prompt_profile_row)?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        if out.is_empty() {
+            out.push(PromptProfile::default());
+        }
+        Ok(out)
+    }
 
-        let Some((id, name, sys, with_list, auto_detect, rules_json, tasks_json, langs_json)) = row
-        else {
-            return Ok(PromptProfile::default());
-        };
+    pub fn get_prompt_profile(&self, id: &str) -> Result<Option<PromptProfile>> {
+        let conn = self.connect()?;
+        conn.query_row(
+            "SELECT id, name, system_instruction, names_with_list, names_auto_detect,
+                    grading_rules_json, task_types_json, feedback_langs_json,
+                    temperature, strictness
+             FROM prompt_profiles WHERE id = ?1",
+            params![id],
+            map_prompt_profile_row,
+        )
+        .optional()
+        .map_err(Into::into)
+    }
 
-        let grading_rules: Vec<String> = serde_json::from_str(&rules_json).unwrap_or_default();
-        let task_types: BTreeMap<String, String> = serde_json::from_str(&tasks_json).unwrap_or_default();
-        let feedback_languages: BTreeMap<String, String> =
-            serde_json::from_str(&langs_json).unwrap_or_default();
+    pub fn load_prompt_profile(&self) -> Result<PromptProfile> {
+        let active_id = self.active_prompt_profile_id()?;
+        if let Some(p) = self.get_prompt_profile(&active_id)? {
+            return Ok(p);
+        }
+        if active_id != "default" {
+            if let Some(p) = self.get_prompt_profile("default")? {
+                return Ok(p);
+            }
+        }
+        Ok(PromptProfile::default())
+    }
 
-        Ok(merge_with_default(PromptProfile {
-            id,
-            name,
-            system_instruction: sys,
-            names_with_list: with_list,
-            names_auto_detect: auto_detect,
-            grading_rules,
-            task_types,
-            feedback_languages,
-        }))
+    pub fn set_active_prompt_profile(&self, id: &str) -> Result<PromptProfile> {
+        let profile = self
+            .get_prompt_profile(id)?
+            .ok_or_else(|| GraderError::InvalidInput(format!("Không tìm thấy Prompt Profile '{id}'.")))?;
+        self.set_setting("active_prompt_profile_id", &profile.id)?;
+        Ok(profile)
     }
 
     pub fn save_prompt_profile(&self, profile: &PromptProfile) -> Result<()> {
+        if profile.id.trim().is_empty() || profile.name.trim().is_empty() {
+            return Err(GraderError::InvalidInput(
+                "ID và tên Prompt Profile không được để trống.".into(),
+            ));
+        }
         let mut conn = self.connect()?;
         let tx = conn.transaction()?;
         save_prompt_profile_tx(&tx, profile, &now_iso())?;
         tx.commit()?;
+        Ok(())
+    }
+
+    pub fn clone_prompt_profile(
+        &self,
+        source_id: &str,
+        new_id: &str,
+        new_name: &str,
+    ) -> Result<PromptProfile> {
+        let clean_id = new_id.trim();
+        let clean_name = new_name.trim();
+        if clean_id.is_empty() || clean_name.is_empty() {
+            return Err(GraderError::InvalidInput(
+                "ID và tên Prompt Profile mới không được để trống.".into(),
+            ));
+        }
+        let mut profile = self
+            .get_prompt_profile(source_id)?
+            .unwrap_or_else(PromptProfile::default);
+        profile.id = clean_id.to_string();
+        profile.name = clean_name.to_string();
+        self.save_prompt_profile(&profile)?;
+        Ok(profile)
+    }
+
+    pub fn delete_prompt_profile(&self, id: &str) -> Result<()> {
+        if id == "default" {
+            return Err(GraderError::InvalidInput(
+                "Không thể xóa Prompt Profile mặc định.".into(),
+            ));
+        }
+        let active_id = self.active_prompt_profile_id()?;
+        let conn = self.connect()?;
+        conn.execute("DELETE FROM prompt_profiles WHERE id = ?1", params![id])?;
+        drop(conn);
+        if active_id == id {
+            self.set_setting("active_prompt_profile_id", "default")?;
+        }
         Ok(())
     }
 
@@ -873,16 +941,83 @@ fn upsert_rubric_tx(tx: &rusqlite::Transaction<'_>, rubric: &Rubric, now: &str) 
     Ok(())
 }
 
+fn ensure_prompt_profile_columns(conn: &Connection) -> Result<()> {
+    let mut stmt = conn.prepare("PRAGMA table_info(prompt_profiles)")?;
+    let cols: Vec<String> = stmt
+        .query_map([], |row| row.get::<_, String>(1))?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    if !cols.iter().any(|c| c == "temperature") {
+        conn.execute(
+            "ALTER TABLE prompt_profiles ADD COLUMN temperature REAL NOT NULL DEFAULT 0.25",
+            [],
+        )?;
+    }
+    if !cols.iter().any(|c| c == "strictness") {
+        conn.execute(
+            "ALTER TABLE prompt_profiles ADD COLUMN strictness TEXT NOT NULL DEFAULT 'standard'",
+            [],
+        )?;
+    }
+    Ok(())
+}
+
+fn map_prompt_profile_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<PromptProfile> {
+    let id: String = row.get(0)?;
+    let name: String = row.get(1)?;
+    let sys: String = row.get(2)?;
+    let with_list: String = row.get(3)?;
+    let auto_detect: String = row.get(4)?;
+    let rules_json: String = row.get(5)?;
+    let tasks_json: String = row.get(6)?;
+    let langs_json: String = row.get(7)?;
+    let temperature: f64 = row.get::<_, Option<f64>>(8)?.unwrap_or(f64::from(default_temperature()));
+    let strictness: String = row
+        .get::<_, Option<String>>(9)?
+        .unwrap_or_else(default_strictness);
+
+    let grading_rules: Vec<String> = serde_json::from_str(&rules_json).unwrap_or_default();
+    let task_types: BTreeMap<String, String> = serde_json::from_str(&tasks_json).unwrap_or_default();
+    let feedback_languages: BTreeMap<String, String> =
+        serde_json::from_str(&langs_json).unwrap_or_default();
+
+    Ok(merge_with_default(PromptProfile {
+        id,
+        name,
+        system_instruction: sys,
+        names_with_list: with_list,
+        names_auto_detect: auto_detect,
+        grading_rules,
+        task_types,
+        feedback_languages,
+        temperature: temperature as f32,
+        strictness,
+    }))
+}
+
 fn save_prompt_profile_tx(
     tx: &rusqlite::Transaction<'_>,
     profile: &PromptProfile,
     now: &str,
 ) -> Result<()> {
+    let temp = if profile.temperature.is_finite() {
+        profile.temperature.clamp(0.0, 1.0)
+    } else {
+        default_temperature()
+    };
+    let strictness = if matches!(
+        profile.strictness.as_str(),
+        "encouraging" | "standard" | "strict"
+    ) {
+        profile.strictness.as_str()
+    } else {
+        "standard"
+    };
     tx.execute(
         "INSERT INTO prompt_profiles (
             id, name, system_instruction, names_with_list, names_auto_detect,
-            grading_rules_json, task_types_json, feedback_langs_json, updated_at
-         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+            grading_rules_json, task_types_json, feedback_langs_json,
+            temperature, strictness, updated_at
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
          ON CONFLICT(id) DO UPDATE SET
             name = excluded.name,
             system_instruction = excluded.system_instruction,
@@ -891,16 +1026,20 @@ fn save_prompt_profile_tx(
             grading_rules_json = excluded.grading_rules_json,
             task_types_json = excluded.task_types_json,
             feedback_langs_json = excluded.feedback_langs_json,
+            temperature = excluded.temperature,
+            strictness = excluded.strictness,
             updated_at = excluded.updated_at",
         params![
-            profile.id,
-            profile.name,
+            profile.id.trim(),
+            profile.name.trim(),
             profile.system_instruction.trim(),
             profile.names_with_list.trim(),
             profile.names_auto_detect.trim(),
             serde_json::to_string(&profile.grading_rules)?,
             serde_json::to_string(&profile.task_types)?,
             serde_json::to_string(&profile.feedback_languages)?,
+            f64::from(temp),
+            strictness,
             now,
         ],
     )?;

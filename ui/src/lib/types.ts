@@ -90,6 +90,13 @@ export interface PromptProfile {
   grading_rules: string[];
   task_types: Record<string, string>;
   feedback_languages: Record<string, string>;
+  temperature: number;
+  strictness: string;
+}
+
+export interface PromptParts {
+  system_instruction: string;
+  user_prompt: string;
 }
 
 export interface VideoPreset {
@@ -126,6 +133,8 @@ export interface AppBootstrap {
   mp3_presets: Mp3Preset[];
   rubrics: Rubric[];
   prompt_profile: PromptProfile;
+  prompt_profiles: PromptProfile[];
+  active_prompt_profile_id: string;
 }
 
 export interface FileInfo {

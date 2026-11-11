@@ -4,6 +4,14 @@ use serde::{Deserialize, Serialize};
 
 use crate::rubrics::Rubric;
 
+pub fn default_temperature() -> f32 {
+    0.25
+}
+
+pub fn default_strictness() -> String {
+    "standard".to_string()
+}
+
 /// Cấu hình prompt chuẩn hóa, lưu trong SQLite (`prompt_profiles`).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct PromptProfile {
@@ -15,6 +23,17 @@ pub struct PromptProfile {
     pub grading_rules: Vec<String>,
     pub task_types: BTreeMap<String, String>,
     pub feedback_languages: BTreeMap<String, String>,
+    #[serde(default = "default_temperature")]
+    pub temperature: f32,
+    #[serde(default = "default_strictness")]
+    pub strictness: String,
+}
+
+/// Hai phần prompt thực tế gửi cho Gemini (`systemInstruction` và `contents` user part).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PromptParts {
+    pub system_instruction: String,
+    pub user_prompt: String,
 }
 
 impl Default for PromptProfile {
@@ -61,6 +80,8 @@ impl Default for PromptProfile {
             grading_rules: vec![
                 "Xem cả HÌNH ẢNH và ÂM THANH (phát âm, ngữ điệu, cử chỉ, sự tự tin).".into(),
                 "Chấm điểm CHÍNH XÁC theo từng tiêu chí của rubric, không tự thêm/bớt tiêu chí.".into(),
+                "Tính total_score và max_total_score KHỚP với quy tắc thang điểm của rubric (cộng tổng hay trung bình và bước làm tròn).".into(),
+                "Chỉ nhận xét dựa trên phần nghe/nhìn thực tế trong video; nếu âm thanh ồn, quá nhỏ hoặc thời lượng nói quá ngắn (< 15 giây), hãy ghi rõ hạn chế trong general_notes và đặt name_confident=false khi chưa chắc danh tính.".into(),
                 "Với mỗi học sinh: nêu điểm mạnh, điểm yếu, gợi ý cải thiện cụ thể và hướng luyện tập.".into(),
                 "Đưa dẫn chứng kèm mốc thời gian (timestamp) cho các nhận xét.".into(),
                 "Chấm công bằng theo trình độ; giải thích chi tiết lý do mỗi mức điểm.".into(),
@@ -69,6 +90,8 @@ impl Default for PromptProfile {
             ],
             task_types,
             feedback_languages,
+            temperature: default_temperature(),
+            strictness: default_strictness(),
         }
     }
 }
@@ -94,18 +117,41 @@ pub fn merge_with_default(mut profile: PromptProfile) -> PromptProfile {
     for (k, v) in def.feedback_languages {
         profile.feedback_languages.entry(k).or_insert(v);
     }
+    if !profile.temperature.is_finite() {
+        profile.temperature = default_temperature();
+    } else {
+        profile.temperature = profile.temperature.clamp(0.0, 1.0);
+    }
+    if !matches!(
+        profile.strictness.as_str(),
+        "encouraging" | "standard" | "strict"
+    ) {
+        profile.strictness = default_strictness();
+    }
     profile
 }
 
-/// Dựng prompt hoàn chỉnh gửi cho Gemini từ `PromptProfile`, `Rubric` và tùy chọn của giáo viên.
-pub fn build_grading_prompt(
+fn strictness_instruction(strictness: &str) -> &'static str {
+    match strictness {
+        "encouraging" => {
+            "Khuyến khích & sư phạm: ghi nhận nỗ lực giao tiếp, chấm nới tay nhẹ với lỗi nhỏ không làm mất nghĩa, ưu tiên gợi ý động viên dễ áp dụng."
+        }
+        "strict" => {
+            "Khắt khe chuẩn thi cử: áp dụng đúng tiêu chuẩn học thuật/chứng chỉ, trừ điểm rõ ràng các lỗi phát âm sai hệ thống, lặp từ, ngắt quãng hoặc sai ngữ pháp."
+        }
+        _ => "Tiêu chuẩn & cân bằng: đánh giá khách quan, công bằng giữa độ trôi chảy, phát âm, từ vựng và ngữ pháp.",
+    }
+}
+
+/// Tách prompt thành `systemInstruction` (gửi ở cấp hệ thống) và `user_prompt` (gửi cùng video).
+pub fn build_prompt_parts(
     profile: &PromptProfile,
     rubric: &Rubric,
     task_type: &str,
     feedback_language: &str,
     student_names: Option<&[String]>,
     extra_instructions: &str,
-) -> String {
+) -> PromptParts {
     let task_desc = profile
         .task_types
         .get(task_type)
@@ -128,13 +174,11 @@ pub fn build_grading_prompt(
     };
 
     let mut parts: Vec<String> = Vec::new();
-    let sys = profile.system_instruction.trim();
-    if !sys.is_empty() {
-        parts.push(sys.to_string());
-        parts.push(String::new());
-    }
-
     parts.push(format!("LOẠI BÀI: {task_desc}"));
+    parts.push(format!(
+        "MỨC ĐỘ KHẮT KHE: {}",
+        strictness_instruction(&profile.strictness)
+    ));
     parts.push(String::new());
     parts.push(rubric.to_prompt_block());
     parts.push(String::new());
@@ -172,5 +216,32 @@ pub fn build_grading_prompt(
             .to_string(),
     );
 
-    parts.join("\n")
+    PromptParts {
+        system_instruction: profile.system_instruction.trim().to_string(),
+        user_prompt: parts.join("\n"),
+    }
+}
+
+/// Dựng prompt gộp đầy đủ (hữu ích cho test hoặc hiển thị toàn văn).
+pub fn build_grading_prompt(
+    profile: &PromptProfile,
+    rubric: &Rubric,
+    task_type: &str,
+    feedback_language: &str,
+    student_names: Option<&[String]>,
+    extra_instructions: &str,
+) -> String {
+    let parts = build_prompt_parts(
+        profile,
+        rubric,
+        task_type,
+        feedback_language,
+        student_names,
+        extra_instructions,
+    );
+    if parts.system_instruction.is_empty() {
+        parts.user_prompt
+    } else {
+        format!("{}\n\n{}", parts.system_instruction, parts.user_prompt)
+    }
 }
