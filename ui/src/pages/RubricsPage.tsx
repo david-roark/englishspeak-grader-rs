@@ -132,10 +132,10 @@ export function RubricsPage({ rubrics, onRubricsChanged }: RubricsPageProps) {
   }
 
   return (
-    <div className="grid gap-6 lg:grid-cols-12">
+    <div className="grid items-start gap-4 md:grid-cols-12">
       {/* Left: List & preview */}
-      <div className="space-y-4 lg:col-span-5">
-        <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-xs">
+      <div className="space-y-3 md:col-span-5 xl:col-span-4">
+        <div className="rounded-xl border border-slate-200 bg-white p-3.5 shadow-xs">
           <div className="flex items-center justify-between">
             <h2 className="text-sm font-bold text-slate-800">
               Danh sách Rubric ({rubrics.length})
@@ -150,7 +150,7 @@ export function RubricsPage({ rubrics, onRubricsChanged }: RubricsPageProps) {
             </button>
           </div>
 
-          <div className="mt-3 space-y-2">
+          <div className="mt-2.5 max-h-[36vh] space-y-2 overflow-y-auto pr-1">
             {rubrics.map((r) => {
               const active = selected?.id === r.id;
               const maxTotal = r.criteria.reduce((sum, c) => sum + c.max_score, 0);
@@ -273,8 +273,8 @@ export function RubricsPage({ rubrics, onRubricsChanged }: RubricsPageProps) {
       </div>
 
       {/* Right: Create / Edit Form */}
-      <div className="lg:col-span-7">
-        <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-xs">
+      <div className="md:col-span-7 xl:col-span-8">
+        <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-xs">
           <h2 className="text-base font-bold text-slate-900">
             Tạo / Chỉnh sửa Rubric tùy chỉnh
           </h2>
@@ -360,7 +360,7 @@ export function RubricsPage({ rubrics, onRubricsChanged }: RubricsPageProps) {
                     value={c.name}
                     onChange={(e) => updateRow(idx, { name: e.target.value })}
                     placeholder="Tên tiêu chí"
-                    className="col-span-3 rounded border border-slate-200 bg-white px-2 py-1.5 text-xs"
+                    className="col-span-12 rounded border border-slate-200 bg-white px-2 py-1.5 text-xs sm:col-span-3"
                   />
                   <input
                     type="text"
@@ -369,7 +369,7 @@ export function RubricsPage({ rubrics, onRubricsChanged }: RubricsPageProps) {
                       updateRow(idx, { description: e.target.value })
                     }
                     placeholder="Mô tả"
-                    className="col-span-5 rounded border border-slate-200 bg-white px-2 py-1.5 text-xs"
+                    className="col-span-12 rounded border border-slate-200 bg-white px-2 py-1.5 text-xs sm:col-span-4"
                   />
                   <input
                     type="number"
@@ -379,7 +379,8 @@ export function RubricsPage({ rubrics, onRubricsChanged }: RubricsPageProps) {
                       updateRow(idx, { min_score: Number(e.target.value) })
                     }
                     placeholder="Min"
-                    className="col-span-1 rounded border border-slate-200 bg-white px-2 py-1.5 text-xs"
+                    title="Điểm tối thiểu"
+                    className="col-span-5 rounded border border-slate-200 bg-white px-2 py-1.5 text-xs sm:col-span-2"
                   />
                   <input
                     type="number"
@@ -389,7 +390,8 @@ export function RubricsPage({ rubrics, onRubricsChanged }: RubricsPageProps) {
                       updateRow(idx, { max_score: Number(e.target.value) })
                     }
                     placeholder="Max"
-                    className="col-span-2 rounded border border-slate-200 bg-white px-2 py-1.5 text-xs"
+                    title="Điểm tối đa"
+                    className="col-span-5 rounded border border-slate-200 bg-white px-2 py-1.5 text-xs sm:col-span-2"
                   />
                   <button
                     type="button"
@@ -397,7 +399,7 @@ export function RubricsPage({ rubrics, onRubricsChanged }: RubricsPageProps) {
                       setCriteria((prev) => prev.filter((_, i) => i !== idx))
                     }
                     disabled={criteria.length <= 1}
-                    className="col-span-1 flex justify-center rounded p-1 text-slate-400 hover:text-rose-600 disabled:opacity-30"
+                    className="col-span-2 flex justify-center rounded p-1 text-slate-400 hover:text-rose-600 disabled:opacity-30 sm:col-span-1"
                     title="Xóa dòng"
                   >
                     <Trash2 className="h-3.5 w-3.5" />

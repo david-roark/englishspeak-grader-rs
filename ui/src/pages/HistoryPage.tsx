@@ -50,10 +50,10 @@ export function HistoryPage() {
   }
 
   return (
-    <div className="grid gap-6 lg:grid-cols-12">
+    <div className="grid items-start gap-4 md:grid-cols-12">
       {/* Left list */}
-      <div className="space-y-3 lg:col-span-5 xl:col-span-4">
-        <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-xs">
+      <div className="space-y-3 md:sticky md:top-4 md:col-span-5 xl:col-span-4 2xl:col-span-3">
+        <div className="rounded-xl border border-slate-200 bg-white p-3.5 shadow-xs">
           <div className="flex items-center gap-2">
             <div className="relative flex-1">
               <Search className="pointer-events-none absolute top-2.5 left-3 h-4 w-4 text-slate-400" />
@@ -66,7 +66,7 @@ export function HistoryPage() {
                   void refresh(val);
                 }}
                 placeholder="Tìm theo tên học sinh, video, rubric..."
-                className="w-full rounded-lg border border-slate-200 py-2 pr-3 pl-9 text-sm focus:border-indigo-400 focus:outline-none"
+                className="w-full rounded-lg border border-slate-200 py-1.5 pr-3 pl-9 text-sm focus:border-indigo-400 focus:outline-none"
               />
             </div>
             <button
@@ -85,7 +85,7 @@ export function HistoryPage() {
             </div>
           )}
 
-          <div className="mt-3 max-h-[65vh] space-y-2 overflow-y-auto pr-1">
+          <div className="mt-2.5 max-h-[calc(100vh-12rem)] space-y-2 overflow-y-auto pr-1">
             {rows.length === 0 ? (
               <p className="py-8 text-center text-xs text-slate-400">
                 Chưa có bản ghi lịch sử nào.
@@ -97,7 +97,7 @@ export function HistoryPage() {
                   <div
                     key={r.id}
                     onClick={() => void selectItem(r.id)}
-                    className={`cursor-pointer rounded-xl border p-3 transition ${
+                    className={`cursor-pointer rounded-xl border p-2.5 transition ${
                       active
                         ? "border-indigo-400 bg-indigo-50/50"
                         : "border-slate-200 hover:bg-slate-50"
@@ -139,7 +139,7 @@ export function HistoryPage() {
       </div>
 
       {/* Right detail */}
-      <div className="lg:col-span-7 xl:col-span-8">
+      <div className="md:col-span-7 xl:col-span-8 2xl:col-span-9">
         {selected ? (
           <ResultView
             detail={selected}
@@ -149,7 +149,7 @@ export function HistoryPage() {
             }}
           />
         ) : (
-          <div className="flex min-h-[360px] items-center justify-center rounded-xl border border-dashed border-slate-200 bg-white/60 p-8 text-center text-sm text-slate-500">
+          <div className="flex min-h-[260px] items-center justify-center rounded-xl border border-dashed border-slate-200 bg-white/60 p-6 text-center text-sm text-slate-500">
             Chọn một lần chấm bên trái để xem chi tiết, gán lại tên học sinh hoặc xuất lại Excel.
           </div>
         )}

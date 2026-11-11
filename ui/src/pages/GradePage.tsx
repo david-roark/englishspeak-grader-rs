@@ -187,11 +187,11 @@ export function GradePage({
   }
 
   return (
-    <div className="grid gap-6 lg:grid-cols-12">
-      {/* Left column: Controls */}
-      <div className="space-y-4 lg:col-span-5 xl:col-span-4">
-        <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-xs">
-          <div className="flex items-center justify-between">
+    <div className="grid items-start gap-4 md:grid-cols-12">
+      {/* Left column: Controls (sticky on desktop so video stays visible while reading results) */}
+      <div className="space-y-3 md:sticky md:top-4 md:col-span-5 xl:col-span-4">
+        <div className="rounded-xl border border-slate-200 bg-white p-3.5 shadow-xs">
+          <div className="flex items-center justify-between gap-2">
             <h2 className="text-sm font-bold text-slate-800">
               1. Video bài nói của học sinh
             </h2>
@@ -199,7 +199,7 @@ export function GradePage({
               type="button"
               onClick={handlePickVideo}
               disabled={busyTaskId !== null}
-              className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-50 px-3 py-1.5 text-xs font-semibold text-indigo-700 hover:bg-indigo-100 disabled:opacity-50"
+              className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-indigo-50 px-2.5 py-1.5 text-xs font-semibold text-indigo-700 hover:bg-indigo-100 disabled:opacity-50"
             >
               <Upload className="h-3.5 w-3.5" />
               Chọn video
@@ -207,14 +207,14 @@ export function GradePage({
           </div>
 
           {videoInfo ? (
-            <div className="mt-3 space-y-2.5">
+            <div className="mt-2.5 space-y-2">
               <video
                 ref={videoRef}
                 src={api.mediaUrl(videoInfo.path)}
                 controls
-                className="aspect-video w-full rounded-lg bg-black object-contain"
+                className="aspect-video max-h-[280px] w-full rounded-lg bg-black object-contain"
               />
-              <div className="flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-700">
+              <div className="flex items-center justify-between gap-2 rounded-lg bg-slate-50 px-3 py-1.5 text-xs text-slate-700">
                 <span className="truncate font-medium" title={videoInfo.path}>
                   {videoInfo.name}
                 </span>
@@ -239,10 +239,10 @@ export function GradePage({
             <button
               type="button"
               onClick={handlePickVideo}
-              className="mt-3 flex w-full flex-col items-center justify-center rounded-xl border-2 border-dashed border-slate-200 bg-slate-50/70 px-4 py-8 text-center hover:border-indigo-300 hover:bg-indigo-50/30"
+              className="mt-2.5 flex w-full flex-col items-center justify-center rounded-xl border-2 border-dashed border-slate-200 bg-slate-50/70 px-4 py-5 text-center hover:border-indigo-300 hover:bg-indigo-50/30"
             >
-              <FileVideo className="h-8 w-8 text-slate-400" />
-              <span className="mt-2 text-sm font-medium text-slate-700">
+              <FileVideo className="h-7 w-7 text-slate-400" />
+              <span className="mt-1.5 text-sm font-medium text-slate-700">
                 Bấm để chọn file video (.mp4, .mov, .webm...)
               </span>
               <span className="mt-0.5 text-xs text-slate-400">
@@ -252,7 +252,7 @@ export function GradePage({
           )}
 
           {/* Accordion nén video */}
-          <div className="mt-3 border-t border-slate-100 pt-3">
+          <div className="mt-2.5 border-t border-slate-100 pt-2.5">
             <button
               type="button"
               onClick={() => setCompressOpen((v) => !v)}
@@ -270,7 +270,7 @@ export function GradePage({
             </button>
 
             {compressOpen && (
-              <div className="mt-2.5 space-y-2.5 rounded-lg bg-slate-50 p-3">
+              <div className="mt-2 space-y-2 rounded-lg bg-slate-50 p-2.5">
                 {!ffmpegAvailable && (
                   <p className="text-xs text-amber-700">
                     ⚠️ Chưa tìm thấy ffmpeg. Hãy cài ffmpeg hoặc cấu hình trong tab Cài đặt.
@@ -279,7 +279,7 @@ export function GradePage({
                 <select
                   value={compressPreset}
                   onChange={(e) => setCompressPreset(e.target.value)}
-                  className="w-full rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-xs text-slate-800"
+                  className="w-full rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs text-slate-800"
                 >
                   {videoPresets.map((p) => (
                     <option key={p.key} value={p.key}>
@@ -291,7 +291,7 @@ export function GradePage({
                   type="button"
                   onClick={handleCompressInline}
                   disabled={!videoInfo || compressing || busyTaskId !== null || !ffmpegAvailable}
-                  className="w-full rounded-lg border border-indigo-200 bg-white px-3 py-2 text-xs font-semibold text-indigo-700 hover:bg-indigo-50 disabled:opacity-50"
+                  className="w-full rounded-lg border border-indigo-200 bg-white px-3 py-1.5 text-xs font-semibold text-indigo-700 hover:bg-indigo-50 disabled:opacity-50"
                 >
                   {compressing ? "Đang nén video..." : "Thực hiện nén từ file gốc"}
                 </button>
@@ -301,7 +301,7 @@ export function GradePage({
         </div>
 
         {/* Grading config */}
-        <div className="space-y-3 rounded-xl border border-slate-200 bg-white p-4 shadow-xs">
+        <div className="space-y-2.5 rounded-xl border border-slate-200 bg-white p-3.5 shadow-xs">
           <h2 className="text-sm font-bold text-slate-800">2. Thiết lập chấm bài</h2>
 
           <div>
@@ -311,7 +311,7 @@ export function GradePage({
             <select
               value={rubricId}
               onChange={(e) => setRubricId(e.target.value)}
-              className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
+              className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-sm"
             >
               {rubrics.map((r) => (
                 <option key={r.id} value={r.id}>
@@ -321,7 +321,7 @@ export function GradePage({
             </select>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-2 gap-2.5">
             <div>
               <label className="block text-xs font-semibold text-slate-600">
                 Loại bài nói
@@ -329,7 +329,7 @@ export function GradePage({
               <select
                 value={taskType}
                 onChange={(e) => setTaskType(e.target.value)}
-                className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-sm"
+                className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm"
               >
                 {Object.entries(TASK_LABELS).map(([k, label]) => (
                   <option key={k} value={k}>
@@ -345,7 +345,7 @@ export function GradePage({
               <select
                 value={feedbackLang}
                 onChange={(e) => setFeedbackLang(e.target.value)}
-                className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-sm"
+                className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm"
               >
                 {Object.entries(LANG_LABELS).map(([k, label]) => (
                   <option key={k} value={k}>
@@ -365,7 +365,7 @@ export function GradePage({
               value={studentNames}
               onChange={(e) => setStudentNames(e.target.value)}
               placeholder="VD: An, Bình — để trống nếu muốn AI tự lấy tên"
-              className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-indigo-400 focus:outline-none"
+              className="mt-1 w-full rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm focus:border-indigo-400 focus:outline-none"
             />
           </div>
 
@@ -378,7 +378,7 @@ export function GradePage({
               value={extraInstructions}
               onChange={(e) => setExtraInstructions(e.target.value)}
               placeholder="VD: chú trọng phát âm; bỏ qua phần chào hỏi..."
-              className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-indigo-400 focus:outline-none"
+              className="mt-1 w-full rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm focus:border-indigo-400 focus:outline-none"
             />
           </div>
 
@@ -386,7 +386,7 @@ export function GradePage({
             type="button"
             onClick={handleGrade}
             disabled={!videoInfo || busyTaskId !== null}
-            className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 py-3 text-sm font-bold text-white shadow-xs hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
+            className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-bold text-white shadow-xs hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
           >
             <Rocket className="h-4 w-4" />
             {busyTaskId && !compressing ? "Đang chấm bài..." : "Chấm điểm bằng AI"}
@@ -395,7 +395,7 @@ export function GradePage({
       </div>
 
       {/* Right column: Status, Progress, Results */}
-      <div className="space-y-4 lg:col-span-7 xl:col-span-8">
+      <div className="space-y-3 md:col-span-7 xl:col-span-8">
         {busyTaskId && (
           <ProgressPanel
             stage={progressStage}
@@ -411,7 +411,7 @@ export function GradePage({
         )}
 
         {!errorMsg && statusMsg && (
-          <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">
+          <div className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm text-slate-700">
             {statusMsg}
           </div>
         )}
@@ -424,10 +424,36 @@ export function GradePage({
             onSeekVideo={handleSeek}
           />
         ) : (
-          <div className="flex min-h-[340px] flex-col items-center justify-center rounded-xl border border-dashed border-slate-200 bg-white/60 p-8 text-center">
-            <p className="text-sm font-medium text-slate-500">
-              Kết quả bảng điểm chi tiết, nhận xét và dẫn chứng timestamp sẽ hiển thị tại đây.
-            </p>
+          <div className="rounded-xl border border-dashed border-slate-200 bg-white/60 p-6">
+            <div className="mx-auto max-w-xl text-center">
+              <p className="text-sm font-semibold text-slate-700">
+                Kết quả bảng điểm chi tiết, nhận xét và dẫn chứng timestamp sẽ hiển thị tại đây
+              </p>
+              <p className="mt-1 text-xs text-slate-500">
+                Chọn video bên trái, chọn Rubric phù hợp rồi bấm{" "}
+                <span className="font-semibold text-indigo-600">Chấm điểm bằng AI</span>.
+              </p>
+              <div className="mt-4 grid gap-2.5 text-left text-xs sm:grid-cols-3">
+                <div className="rounded-lg border border-slate-200 bg-white p-3">
+                  <div className="font-bold text-slate-800">1. Chấm theo Rubric</div>
+                  <p className="mt-0.5 text-slate-500">
+                    Tự tách từng học sinh và chấm đúng tiêu chí đã chọn.
+                  </p>
+                </div>
+                <div className="rounded-lg border border-slate-200 bg-white p-3">
+                  <div className="font-bold text-slate-800">2. Nhảy mốc video</div>
+                  <p className="mt-0.5 text-slate-500">
+                    Bấm timestamp trong dẫn chứng để tua nhanh đoạn nói.
+                  </p>
+                </div>
+                <div className="rounded-lg border border-slate-200 bg-white p-3">
+                  <div className="font-bold text-slate-800">3. Xuất Excel & Lịch sử</div>
+                  <p className="mt-0.5 text-slate-500">
+                    Tự động lưu lịch sử SQLite và xuất file .xlsx chỉnh sửa được.
+                  </p>
+                </div>
+              </div>
+            </div>
           </div>
         )}
       </div>

@@ -115,9 +115,9 @@ export function MediaToolsPage({
         </div>
       )}
 
-      <div className="grid gap-6 lg:grid-cols-2">
+      <div className="grid items-start gap-4 md:grid-cols-2">
         {/* Card 1: Compress Video */}
-        <div className="space-y-4 rounded-xl border border-slate-200 bg-white p-5 shadow-xs">
+        <div className="space-y-3 rounded-xl border border-slate-200 bg-white p-4 shadow-xs">
           <div className="flex items-center gap-2">
             <Minimize2 className="h-5 w-5 text-indigo-600" />
             <h2 className="text-base font-bold text-slate-900">
@@ -129,7 +129,7 @@ export function MediaToolsPage({
             type="button"
             onClick={pickForCompress}
             disabled={compTaskId !== null}
-            className="flex w-full items-center justify-center gap-2 rounded-xl border-2 border-dashed border-slate-200 bg-slate-50 px-4 py-5 text-sm font-medium text-slate-700 hover:border-indigo-300"
+            className="flex w-full items-center justify-center gap-2 rounded-xl border-2 border-dashed border-slate-200 bg-slate-50 px-4 py-4 text-sm font-medium text-slate-700 hover:border-indigo-300"
           >
             <FileVideo className="h-5 w-5 text-slate-400" />
             {compFile
@@ -206,7 +206,7 @@ export function MediaToolsPage({
         </div>
 
         {/* Card 2: Extract MP3 */}
-        <div className="space-y-4 rounded-xl border border-slate-200 bg-white p-5 shadow-xs">
+        <div className="space-y-3 rounded-xl border border-slate-200 bg-white p-4 shadow-xs">
           <div className="flex items-center gap-2">
             <Music className="h-5 w-5 text-indigo-600" />
             <h2 className="text-base font-bold text-slate-900">
@@ -218,7 +218,7 @@ export function MediaToolsPage({
             type="button"
             onClick={pickForMp3}
             disabled={mp3TaskId !== null}
-            className="flex w-full items-center justify-center gap-2 rounded-xl border-2 border-dashed border-slate-200 bg-slate-50 px-4 py-5 text-sm font-medium text-slate-700 hover:border-indigo-300"
+            className="flex w-full items-center justify-center gap-2 rounded-xl border-2 border-dashed border-slate-200 bg-slate-50 px-4 py-4 text-sm font-medium text-slate-700 hover:border-indigo-300"
           >
             <FileAudio className="h-5 w-5 text-slate-400" />
             {mp3File

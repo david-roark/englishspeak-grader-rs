@@ -62,8 +62,8 @@ function StudentCard({
   }
 
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-xs">
-      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-100 pb-4">
+    <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-xs">
+      <div className="flex flex-wrap items-start justify-between gap-2.5 border-b border-slate-100 pb-3">
         <div>
           {editing ? (
             <div className="flex flex-wrap items-center gap-2">
@@ -180,7 +180,7 @@ function StudentCard({
       </div>
 
       {/* Điểm mạnh, điểm yếu, gợi ý, luyện tập */}
-      <div className="mt-5 grid gap-4 md:grid-cols-2">
+      <div className="mt-4 grid gap-3 md:grid-cols-2 2xl:grid-cols-4">
         <FeedbackList title="Điểm mạnh" items={s.strengths} tone="emerald" />
         <FeedbackList title="Điểm yếu" items={s.weaknesses} tone="rose" />
         <FeedbackList
@@ -298,9 +298,9 @@ export function ResultView({
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-3">
       {/* Header summary card */}
-      <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-xs">
+      <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-xs">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <div className="flex items-center gap-2 text-xs font-medium text-indigo-600">
