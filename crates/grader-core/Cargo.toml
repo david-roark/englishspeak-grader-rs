@@ -1,0 +1,27 @@
+[package]
+name = "grader-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Core engine for EnglishSpeak Grader: rubrics, prompts, Gemini API client, normalized SQLite storage, Excel export, and FFmpeg media processing."
+
+[dependencies]
+chrono = { version = "0.4", features = ["serde"] }
+directories = "6"
+dotenvy = "0.15"
+regex = "1"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
+rusqlite = { version = "0.32", features = ["bundled"] }
+rust_xlsxwriter = "0.84"
+schemars = "0.8"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tokio = { version = "1", features = ["fs", "io-util", "macros", "process", "rt-multi-thread", "sync", "time"] }
+tokio-util = { version = "0.7", features = ["io"] }
+tracing = "0.1"
+
+[dev-dependencies]
+calamine = "0.38"
+tempfile = "3"
+wiremock = "0.6"

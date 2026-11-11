@@ -1,0 +1,393 @@
+import { useState } from "react";
+import { FolderOpen, RotateCcw, Save } from "lucide-react";
+import { api, LANG_LABELS, MEDIA_RES_OPTIONS, TASK_LABELS } from "../lib/api";
+import type { AppBootstrap, PromptProfile } from "../lib/types";
+
+interface SettingsPageProps {
+  bootstrap: AppBootstrap;
+  onBootstrapUpdated: (next: AppBootstrap) => void;
+}
+
+export function SettingsPage({
+  bootstrap,
+  onBootstrapUpdated,
+}: SettingsPageProps) {
+  // App settings state
+  const [apiKeyDraft, setApiKeyDraft] = useState("");
+  const [defaultModel, setDefaultModel] = useState(bootstrap.default_model);
+  const [mediaRes, setMediaRes] = useState(bootstrap.media_resolution);
+  const [exportDir, setExportDir] = useState(bootstrap.export_dir);
+  const [ffmpegCustom, setFfmpegCustom] = useState(bootstrap.ffmpeg_custom_path);
+  const [settingsMsg, setSettingsMsg] = useState("");
+  const [settingsErr, setSettingsErr] = useState("");
+
+  // Prompt profile state
+  const [profile, setProfile] = useState<PromptProfile>(bootstrap.prompt_profile);
+  const [rulesText, setRulesText] = useState(
+    bootstrap.prompt_profile.grading_rules.join("\n")
+  );
+  const [promptMsg, setPromptMsg] = useState("");
+  const [promptErr, setPromptErr] = useState("");
+
+  async function handleSaveAppSettings(clearKey = false) {
+    setSettingsMsg("");
+    setSettingsErr("");
+    try {
+      const updated = await api.saveSettings({
+        api_key: clearKey ? undefined : apiKeyDraft.trim() || undefined,
+        clear_api_key: clearKey,
+        default_model: defaultModel,
+        media_resolution: mediaRes,
+        export_dir: exportDir,
+        ffmpeg_custom_path: ffmpegCustom,
+      });
+      setApiKeyDraft("");
+      onBootstrapUpdated(updated);
+      setSettingsMsg("✅ Đã lưu cài đặt ứng dụng.");
+    } catch (e) {
+      setSettingsErr(String(e));
+    }
+  }
+
+  async function handleSavePrompt() {
+    setPromptMsg("");
+    setPromptErr("");
+    const rules = rulesText
+      .split("\n")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    try {
+      const saved = await api.savePromptProfile({
+        ...profile,
+        grading_rules: rules,
+      });
+      setProfile(saved);
+      setRulesText(saved.grading_rules.join("\n"));
+      onBootstrapUpdated({ ...bootstrap, prompt_profile: saved });
+      setPromptMsg("✅ Đã lưu cấu hình prompt! Áp dụng ngay cho lần chấm tiếp theo.");
+    } catch (e) {
+      setPromptErr(String(e));
+    }
+  }
+
+  async function handleResetPrompt() {
+    setPromptMsg("");
+    setPromptErr("");
+    try {
+      const reset = await api.resetPromptProfile();
+      setProfile(reset);
+      setRulesText(reset.grading_rules.join("\n"));
+      onBootstrapUpdated({ ...bootstrap, prompt_profile: reset });
+      setPromptMsg("🔄 Đã khôi phục cấu hình prompt về mặc định.");
+    } catch (e) {
+      setPromptErr(String(e));
+    }
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* System & API Settings */}
+      <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-xs">
+        <h2 className="text-base font-bold text-slate-900">
+          Cài đặt hệ thống &amp; Gemini API
+        </h2>
+        <p className="mt-1 text-xs text-slate-500">
+          Database SQLite hiện tại: <code>{bootstrap.db_path}</code>{" "}
+          ({bootstrap.is_portable ? "Chế độ Portable" : "Thư mục chuẩn hệ điều hành"})
+        </p>
+
+        <div className="mt-4 grid gap-4 md:grid-cols-2">
+          <div>
+            <label className="block text-xs font-semibold text-slate-600">
+              Gemini API Key{" "}
+              {bootstrap.has_api_key && (
+                <span className="text-emerald-600">
+                  (Đang lưu: {bootstrap.masked_api_key})
+                </span>
+              )}
+            </label>
+            <div className="mt-1 flex gap-2">
+              <input
+                type="password"
+                value={apiKeyDraft}
+                onChange={(e) => setApiKeyDraft(e.target.value)}
+                placeholder={
+                  bootstrap.has_api_key
+                    ? "Nhập key mới để thay thế..."
+                    : "Dán key từ https://aistudio.google.com"
+                }
+                className="flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm"
+              />
+              {bootstrap.has_api_key && (
+                <button
+                  type="button"
+                  onClick={() => void handleSaveAppSettings(true)}
+                  className="rounded-lg border border-rose-200 px-3 py-2 text-xs font-medium text-rose-700 hover:bg-rose-50"
+                >
+                  Xóa key đã lưu
+                </button>
+              )}
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-slate-600">
+              Cấp độ quan sát mặc định
+            </label>
+            <select
+              value={mediaRes}
+              onChange={(e) => setMediaRes(e.target.value)}
+              className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
+            >
+              {MEDIA_RES_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-slate-600">
+              Thư mục lưu Excel / Video nén / MP3
+            </label>
+            <div className="mt-1 flex gap-2">
+              <input
+                type="text"
+                value={exportDir}
+                onChange={(e) => setExportDir(e.target.value)}
+                className="flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm"
+              />
+              <button
+                type="button"
+                onClick={async () => {
+                  const dir = await api.pickFolder("Chọn thư mục xuất file");
+                  if (dir) setExportDir(dir);
+                }}
+                className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50"
+              >
+                <FolderOpen className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-slate-600">
+              Đường dẫn FFmpeg{" "}
+              <span className="font-normal text-slate-500">
+                (Đang dùng: {bootstrap.ffmpeg_path ?? "Chưa tìm thấy"})
+              </span>
+            </label>
+            <div className="mt-1 flex gap-2">
+              <input
+                type="text"
+                value={ffmpegCustom}
+                onChange={(e) => setFfmpegCustom(e.target.value)}
+                placeholder="Để trống để tự tìm sidecar hoặc PATH"
+                className="flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm"
+              />
+              <button
+                type="button"
+                onClick={async () => {
+                  const file = await api.pickExecutable("Chọn binary ffmpeg");
+                  if (file) setFfmpegCustom(file);
+                }}
+                className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50"
+              >
+                Chọn file
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-3 max-w-md">
+          <label className="block text-xs font-semibold text-slate-600">
+            Model mặc định khi mở app
+          </label>
+          <input
+            type="text"
+            value={defaultModel}
+            onChange={(e) => setDefaultModel(e.target.value)}
+            className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+          />
+        </div>
+
+        {settingsErr && (
+          <div className="mt-3 rounded bg-rose-50 px-3 py-2 text-xs text-rose-700">
+            ⚠️ {settingsErr}
+          </div>
+        )}
+        {settingsMsg && (
+          <div className="mt-3 rounded bg-emerald-50 px-3 py-2 text-xs text-emerald-700">
+            {settingsMsg}
+          </div>
+        )}
+
+        <div className="mt-4 flex justify-end">
+          <button
+            type="button"
+            onClick={() => void handleSaveAppSettings(false)}
+            className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-4 py-2 text-xs font-bold text-white hover:bg-indigo-700"
+          >
+            <Save className="h-4 w-4" />
+            Lưu cài đặt
+          </button>
+        </div>
+      </div>
+
+      {/* Prompt Profile Editor */}
+      <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-xs">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h2 className="text-base font-bold text-slate-900">
+              Cấu hình Prompt gửi Gemini AI
+            </h2>
+            <p className="mt-0.5 text-xs text-slate-500">
+              Tùy chỉnh vai trò AI, yêu cầu chấm bài và hướng dẫn theo từng loại bài / ngôn ngữ.
+            </p>
+          </div>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={handleResetPrompt}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50"
+            >
+              <RotateCcw className="h-3.5 w-3.5" />
+              Khôi phục mặc định
+            </button>
+            <button
+              type="button"
+              onClick={handleSavePrompt}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-4 py-2 text-xs font-bold text-white hover:bg-indigo-700"
+            >
+              <Save className="h-3.5 w-3.5" />
+              Lưu cấu hình prompt
+            </button>
+          </div>
+        </div>
+
+        {promptErr && (
+          <div className="mt-3 rounded bg-rose-50 px-3 py-2 text-xs text-rose-700">
+            ⚠️ {promptErr}
+          </div>
+        )}
+        {promptMsg && (
+          <div className="mt-3 rounded bg-emerald-50 px-3 py-2 text-xs text-emerald-700">
+            {promptMsg}
+          </div>
+        )}
+
+        <div className="mt-4 grid gap-5 lg:grid-cols-2">
+          <div className="space-y-3">
+            <div>
+              <label className="block text-xs font-semibold text-slate-600">
+                Vai trò &amp; Nhiệm vụ của AI (System Instruction)
+              </label>
+              <textarea
+                rows={3}
+                value={profile.system_instruction}
+                onChange={(e) =>
+                  setProfile({ ...profile, system_instruction: e.target.value })
+                }
+                className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-600">
+                Chỉ dẫn khi có danh sách tên học sinh (biến {"{names}"})
+              </label>
+              <textarea
+                rows={2}
+                value={profile.names_with_list}
+                onChange={(e) =>
+                  setProfile({ ...profile, names_with_list: e.target.value })
+                }
+                className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-600">
+                Chỉ dẫn khi AI tự phát hiện tên học sinh
+              </label>
+              <textarea
+                rows={3}
+                value={profile.names_auto_detect}
+                onChange={(e) =>
+                  setProfile({ ...profile, names_auto_detect: e.target.value })
+                }
+                className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-600">
+                Yêu cầu chấm bài chi tiết (mỗi dòng 1 yêu cầu, hỗ trợ {"{lang_instr}"})
+              </label>
+              <textarea
+                rows={7}
+                value={rulesText}
+                onChange={(e) => setRulesText(e.target.value)}
+                className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+              />
+            </div>
+          </div>
+
+          <div className="space-y-4">
+            <div className="space-y-2.5">
+              <h3 className="text-xs font-bold uppercase tracking-wide text-slate-600">
+                Mô tả theo Loại bài nói
+              </h3>
+              {Object.entries(TASK_LABELS).map(([k, label]) => (
+                <div key={k}>
+                  <label className="block text-xs font-medium text-slate-600">
+                    {label}
+                  </label>
+                  <input
+                    type="text"
+                    value={profile.task_types[k] ?? ""}
+                    onChange={(e) =>
+                      setProfile({
+                        ...profile,
+                        task_types: { ...profile.task_types, [k]: e.target.value },
+                      })
+                    }
+                    className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-1.5 text-sm"
+                  />
+                </div>
+              ))}
+            </div>
+
+            <div className="space-y-2.5">
+              <h3 className="text-xs font-bold uppercase tracking-wide text-slate-600">
+                Chỉ dẫn theo Ngôn ngữ nhận xét
+              </h3>
+              {Object.entries(LANG_LABELS).map(([k, label]) => (
+                <div key={k}>
+                  <label className="block text-xs font-medium text-slate-600">
+                    {label}
+                  </label>
+                  <input
+                    type="text"
+                    value={profile.feedback_languages[k] ?? ""}
+                    onChange={(e) =>
+                      setProfile({
+                        ...profile,
+                        feedback_languages: {
+                          ...profile.feedback_languages,
+                          [k]: e.target.value,
+                        },
+                      })
+                    }
+                    className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-1.5 text-sm"
+                  />
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}

@@ -1,0 +1,24 @@
+# Rust / Cargo
+/target/
+**/*.rs.bk
+
+# Environment & secrets
+.env
+
+# Local user data
+data/
+exports/
+uploads/
+
+# Node / Tauri UI
+ui/node_modules/
+ui/dist/
+src-tauri/target/
+src-tauri/gen/
+src-tauri/binaries/ffmpeg*
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
