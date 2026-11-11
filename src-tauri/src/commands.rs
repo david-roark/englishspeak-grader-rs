@@ -3,9 +3,10 @@ use std::time::{Duration, Instant};
 
 use grader_core::export::{default_export_path, export_to_excel};
 use grader_core::{
-    compress_video, extract_mp3, format_result_markdown, mp3_presets, resolve_ffmpeg,
-    video_presets, AssessmentDetail, AssessmentSummary, GeminiClient, MediaResolution, Mp3Preset,
-    NewAssessment, PromptProfile, Rubric, VideoPreset, DEFAULT_MODEL, FALLBACK_MODELS,
+    compress_video_to, extract_mp3_to, format_result_markdown, mp3_presets, mute_video_to,
+    probe_duration_secs, resolve_ffmpeg, trim_media_to, video_presets, AssessmentDetail,
+    AssessmentSummary, GeminiClient, MediaResolution, Mp3Preset, NewAssessment, PromptProfile,
+    Rubric, VideoPreset, DEFAULT_MODEL, FALLBACK_MODELS,
 };
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State};
@@ -19,6 +20,7 @@ pub struct AppBootstrap {
     pub default_model: String,
     pub media_resolution: String,
     pub export_dir: String,
+    pub has_custom_export_dir: bool,
     pub db_path: String,
     pub ffmpeg_path: Option<String>,
     pub ffmpeg_custom_path: String,
@@ -145,6 +147,7 @@ pub fn get_bootstrap(state: State<'_, AppState>) -> Result<AppBootstrap, String>
         default_model,
         media_resolution,
         export_dir: state.effective_export_dir().to_string_lossy().into_owned(),
+        has_custom_export_dir: state.has_custom_export_dir(),
         db_path: state.paths.db_path.to_string_lossy().into_owned(),
         ffmpeg_path,
         ffmpeg_custom_path,
@@ -324,6 +327,61 @@ pub async fn grade_video_cmd(
     })
 }
 
+fn resolve_ffmpeg_for_state(state: &AppState) -> Result<PathBuf, String> {
+    resolve_ffmpeg(
+        state.effective_ffmpeg_custom_path().as_deref(),
+        Some(&state.paths.bin_dir),
+    )
+    .ok_or_else(|| {
+        "Không tìm thấy ffmpeg. Hãy cài ffmpeg vào PATH hoặc trỏ đường dẫn ffmpeg trong Cài đặt."
+            .to_string()
+    })
+}
+
+fn resolve_media_output_targets(
+    state: &AppState,
+    out_dir_override: Option<String>,
+    out_path_override: Option<String>,
+) -> (PathBuf, Option<PathBuf>) {
+    let out_dir = out_dir_override
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| state.effective_export_dir());
+    let out_file = out_path_override
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .map(PathBuf::from);
+    (out_dir, out_file)
+}
+
+fn build_media_output(out_path: PathBuf, orig_size_mb: f64, fallback_name: &str) -> MediaOutput {
+    let size_bytes = std::fs::metadata(&out_path).map(|m| m.len()).unwrap_or(0);
+    let file_name = out_path
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or(fallback_name)
+        .to_string();
+    MediaOutput {
+        output_path: out_path.to_string_lossy().into_owned(),
+        file_name,
+        size_bytes,
+        size_mb: size_bytes as f64 / (1024.0 * 1024.0),
+        orig_size_mb,
+    }
+}
+
+#[tauri::command]
+pub async fn probe_media_duration(
+    state: State<'_, AppState>,
+    path: String,
+) -> Result<Option<f64>, String> {
+    let Ok(ffmpeg) = resolve_ffmpeg_for_state(&state) else {
+        return Ok(None);
+    };
+    Ok(probe_duration_secs(&ffmpeg, Path::new(&path)).await)
+}
+
 #[tauri::command]
 pub async fn compress_video_cmd(
     app: AppHandle,
@@ -332,31 +390,23 @@ pub async fn compress_video_cmd(
     video_path: String,
     preset: String,
     out_dir_override: Option<String>,
+    out_path_override: Option<String>,
 ) -> Result<MediaOutput, String> {
-    let ffmpeg = resolve_ffmpeg(
-        state.effective_ffmpeg_custom_path().as_deref(),
-        Some(&state.paths.bin_dir),
-    )
-    .ok_or_else(|| {
-        "Không tìm thấy ffmpeg. Hãy cài ffmpeg vào PATH hoặc trỏ đường dẫn ffmpeg trong Cài đặt."
-            .to_string()
-    })?;
-
+    let ffmpeg = resolve_ffmpeg_for_state(&state)?;
     let src = PathBuf::from(&video_path);
     let orig_size_mb = std::fs::metadata(&src)
         .map(|m| m.len() as f64 / (1024.0 * 1024.0))
         .unwrap_or(0.0);
-    let out_dir = out_dir_override
-        .filter(|s| !s.trim().is_empty())
-        .map(PathBuf::from)
-        .unwrap_or_else(|| state.effective_export_dir());
+    let (out_dir, out_file) =
+        resolve_media_output_targets(&state, out_dir_override, out_path_override);
 
     let cancel = state.register_task(&task_id).await;
-    let res = compress_video(
+    let res = compress_video_to(
         &ffmpeg,
         &src,
         &preset,
         &out_dir,
+        out_file.as_deref(),
         |p| emit_progress(&app, &task_id, p.stage, p.percent),
         Some(&cancel),
     )
@@ -364,20 +414,7 @@ pub async fn compress_video_cmd(
     state.finish_task(&task_id).await;
 
     let out_path = res.map_err(|e| e.to_string())?;
-    let size_bytes = std::fs::metadata(&out_path).map(|m| m.len()).unwrap_or(0);
-    let file_name = out_path
-        .file_name()
-        .and_then(|s| s.to_str())
-        .unwrap_or("compressed.mp4")
-        .to_string();
-
-    Ok(MediaOutput {
-        output_path: out_path.to_string_lossy().into_owned(),
-        file_name,
-        size_bytes,
-        size_mb: size_bytes as f64 / (1024.0 * 1024.0),
-        orig_size_mb,
-    })
+    Ok(build_media_output(out_path, orig_size_mb, "compressed.mp4"))
 }
 
 #[tauri::command]
@@ -388,31 +425,23 @@ pub async fn extract_mp3_cmd(
     video_path: String,
     preset: String,
     out_dir_override: Option<String>,
+    out_path_override: Option<String>,
 ) -> Result<MediaOutput, String> {
-    let ffmpeg = resolve_ffmpeg(
-        state.effective_ffmpeg_custom_path().as_deref(),
-        Some(&state.paths.bin_dir),
-    )
-    .ok_or_else(|| {
-        "Không tìm thấy ffmpeg. Hãy cài ffmpeg vào PATH hoặc trỏ đường dẫn ffmpeg trong Cài đặt."
-            .to_string()
-    })?;
-
+    let ffmpeg = resolve_ffmpeg_for_state(&state)?;
     let src = PathBuf::from(&video_path);
     let orig_size_mb = std::fs::metadata(&src)
         .map(|m| m.len() as f64 / (1024.0 * 1024.0))
         .unwrap_or(0.0);
-    let out_dir = out_dir_override
-        .filter(|s| !s.trim().is_empty())
-        .map(PathBuf::from)
-        .unwrap_or_else(|| state.effective_export_dir());
+    let (out_dir, out_file) =
+        resolve_media_output_targets(&state, out_dir_override, out_path_override);
 
     let cancel = state.register_task(&task_id).await;
-    let res = extract_mp3(
+    let res = extract_mp3_to(
         &ffmpeg,
         &src,
         &preset,
         &out_dir,
+        out_file.as_deref(),
         |p| emit_progress(&app, &task_id, p.stage, p.percent),
         Some(&cancel),
     )
@@ -420,20 +449,80 @@ pub async fn extract_mp3_cmd(
     state.finish_task(&task_id).await;
 
     let out_path = res.map_err(|e| e.to_string())?;
-    let size_bytes = std::fs::metadata(&out_path).map(|m| m.len()).unwrap_or(0);
-    let file_name = out_path
-        .file_name()
-        .and_then(|s| s.to_str())
-        .unwrap_or("audio.mp3")
-        .to_string();
+    Ok(build_media_output(out_path, orig_size_mb, "audio.mp3"))
+}
 
-    Ok(MediaOutput {
-        output_path: out_path.to_string_lossy().into_owned(),
-        file_name,
-        size_bytes,
-        size_mb: size_bytes as f64 / (1024.0 * 1024.0),
-        orig_size_mb,
-    })
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub async fn trim_media_cmd(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    task_id: String,
+    input_path: String,
+    start_secs: f64,
+    end_secs: Option<f64>,
+    fast_copy: bool,
+    out_dir_override: Option<String>,
+    out_path_override: Option<String>,
+) -> Result<MediaOutput, String> {
+    let ffmpeg = resolve_ffmpeg_for_state(&state)?;
+    let src = PathBuf::from(&input_path);
+    let orig_size_mb = std::fs::metadata(&src)
+        .map(|m| m.len() as f64 / (1024.0 * 1024.0))
+        .unwrap_or(0.0);
+    let (out_dir, out_file) =
+        resolve_media_output_targets(&state, out_dir_override, out_path_override);
+
+    let cancel = state.register_task(&task_id).await;
+    let res = trim_media_to(
+        &ffmpeg,
+        &src,
+        start_secs,
+        end_secs,
+        fast_copy,
+        &out_dir,
+        out_file.as_deref(),
+        |p| emit_progress(&app, &task_id, p.stage, p.percent),
+        Some(&cancel),
+    )
+    .await;
+    state.finish_task(&task_id).await;
+
+    let out_path = res.map_err(|e| e.to_string())?;
+    Ok(build_media_output(out_path, orig_size_mb, "trimmed.mp4"))
+}
+
+#[tauri::command]
+pub async fn mute_video_cmd(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    task_id: String,
+    video_path: String,
+    out_dir_override: Option<String>,
+    out_path_override: Option<String>,
+) -> Result<MediaOutput, String> {
+    let ffmpeg = resolve_ffmpeg_for_state(&state)?;
+    let src = PathBuf::from(&video_path);
+    let orig_size_mb = std::fs::metadata(&src)
+        .map(|m| m.len() as f64 / (1024.0 * 1024.0))
+        .unwrap_or(0.0);
+    let (out_dir, out_file) =
+        resolve_media_output_targets(&state, out_dir_override, out_path_override);
+
+    let cancel = state.register_task(&task_id).await;
+    let res = mute_video_to(
+        &ffmpeg,
+        &src,
+        &out_dir,
+        out_file.as_deref(),
+        |p| emit_progress(&app, &task_id, p.stage, p.percent),
+        Some(&cancel),
+    )
+    .await;
+    state.finish_task(&task_id).await;
+
+    let out_path = res.map_err(|e| e.to_string())?;
+    Ok(build_media_output(out_path, orig_size_mb, "muted.mp4"))
 }
 
 #[tauri::command]
@@ -598,10 +687,18 @@ pub fn save_settings(
             .map_err(|e| e.to_string())?;
     }
     if let Some(dir) = settings.export_dir {
-        state
-            .db
-            .set_setting("export_dir", dir.trim())
-            .map_err(|e| e.to_string())?;
+        let trimmed = dir.trim();
+        if trimmed.is_empty() {
+            state
+                .db
+                .delete_setting("export_dir")
+                .map_err(|e| e.to_string())?;
+        } else {
+            state
+                .db
+                .set_setting("export_dir", trimmed)
+                .map_err(|e| e.to_string())?;
+        }
     }
     if let Some(ff) = settings.ffmpeg_custom_path {
         state

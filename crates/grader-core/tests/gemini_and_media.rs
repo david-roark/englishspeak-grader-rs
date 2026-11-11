@@ -6,8 +6,9 @@ use grader_core::gemini::{
     MediaResolution, UploadCache, UploadedFile, FALLBACK_MODELS,
 };
 use grader_core::media::{
-    build_compress_video_args, build_extract_mp3_args, compress_video, extract_mp3,
-    parse_duration_from_stderr, resolve_ffmpeg, DEFAULT_MP3_PRESET, DEFAULT_VIDEO_PRESET,
+    build_compress_video_args, build_extract_mp3_args, build_mute_video_args_to,
+    build_trim_media_args_to, compress_video, extract_mp3, parse_duration_from_stderr,
+    resolve_ffmpeg, DEFAULT_MP3_PRESET, DEFAULT_VIDEO_PRESET,
 };
 use grader_core::prompts::PromptProfile;
 use grader_core::rubrics::get_builtin_rubric;
@@ -380,4 +381,34 @@ async fn test_real_ffmpeg_extract_and_compress_if_available() {
         .unwrap();
     assert!(compressed.exists());
     assert!(tokio::fs::metadata(&compressed).await.unwrap().len() > 0);
+}
+
+#[test]
+fn test_trim_and_mute_args_builders() {
+    let input = Path::new("/tmp/speaking.mp4");
+    let out_mp4 = Path::new("/exports/custom_clip.mp4");
+
+    // Validation guards
+    assert!(build_trim_media_args_to(input, -1.0, Some(5.0), true, out_mp4).is_err());
+    assert!(build_trim_media_args_to(input, 10.0, Some(8.0), true, out_mp4).is_err());
+    assert!(build_trim_media_args_to(input, 10.0, Some(10.0), true, out_mp4).is_err());
+
+    // Fast stream-copy trim
+    let copy_args = build_trim_media_args_to(input, 5.5, Some(20.5), true, out_mp4).unwrap();
+    assert!(copy_args.windows(2).any(|w| w == ["-ss", "5.500"]));
+    assert!(copy_args.windows(2).any(|w| w == ["-t", "15.000"]));
+    assert!(copy_args.windows(2).any(|w| w == ["-c", "copy"]));
+    assert_eq!(copy_args.last().unwrap(), "/exports/custom_clip.mp4");
+
+    // Re-encode trim to mp3
+    let out_mp3 = Path::new("/exports/clip.mp3");
+    let reencode_mp3 = build_trim_media_args_to(input, 2.0, None, false, out_mp3).unwrap();
+    assert!(reencode_mp3.contains(&"libmp3lame".to_string()));
+    assert!(!reencode_mp3.contains(&"-t".to_string()));
+
+    // Mute video
+    let mute_args = build_mute_video_args_to(input, out_mp4);
+    assert!(mute_args.contains(&"-an".to_string()));
+    assert!(mute_args.windows(2).any(|w| w == ["-c:v", "copy"]));
+    assert!(mute_args.contains(&"+faststart".to_string()));
 }

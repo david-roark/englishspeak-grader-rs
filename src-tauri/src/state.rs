@@ -66,6 +66,14 @@ impl AppState {
         self.paths.exports_dir.clone()
     }
 
+    pub fn has_custom_export_dir(&self) -> bool {
+        self.db
+            .get_setting("export_dir")
+            .ok()
+            .flatten()
+            .is_some_and(|s| !s.trim().is_empty())
+    }
+
     pub fn effective_ffmpeg_custom_path(&self) -> Option<PathBuf> {
         self.db
             .get_setting("ffmpeg_path")

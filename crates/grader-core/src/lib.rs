@@ -15,9 +15,10 @@ pub use gemini::{
     DEFAULT_MODEL, FALLBACK_MODELS, UPLOAD_TTL_SECS,
 };
 pub use media::{
-    compress_video, extract_mp3, get_mp3_preset, get_video_preset, mp3_presets,
-    probe_duration_secs, resolve_ffmpeg, video_presets, MediaProgress, Mp3Preset, VideoPreset,
-    DEFAULT_MP3_PRESET, DEFAULT_VIDEO_PRESET,
+    compress_video, compress_video_to, extract_mp3, extract_mp3_to, get_mp3_preset,
+    get_video_preset, mp3_presets, mute_video_to, probe_duration_secs, resolve_ffmpeg,
+    trim_media_to, video_presets, MediaProgress, Mp3Preset, VideoPreset, DEFAULT_MP3_PRESET,
+    DEFAULT_VIDEO_PRESET,
 };
 pub use paths::AppPaths;
 pub use prompts::{build_grading_prompt, PromptProfile};

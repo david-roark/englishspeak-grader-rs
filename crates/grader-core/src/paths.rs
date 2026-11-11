@@ -50,7 +50,14 @@ impl AppPaths {
         if let Some(proj) = ProjectDirs::from("com", "englishspeak", "grader") {
             let data_dir = proj.data_local_dir().to_path_buf();
             let exports_dir = UserDirs::new()
-                .and_then(|u| u.document_dir().map(|d| d.join("EnglishSpeakGrader")))
+                .and_then(|u| {
+                    u.document_dir()
+                        .or_else(|| u.download_dir())
+                        .or_else(|| u.desktop_dir())
+                        .map(|d| d.to_path_buf())
+                        .or_else(|| Some(u.home_dir().to_path_buf()))
+                })
+                .map(|d| d.join("EnglishSpeakGrader"))
                 .unwrap_or_else(|| data_dir.join("exports"));
             let env_cwd = std::env::current_dir()
                 .ok()
@@ -69,10 +76,9 @@ impl AppPaths {
         Self::from_base_dir(std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
     }
 
-    /// Ensure core directories exist on disk.
+    /// Ensure core database directory exists on disk (export directories are created lazily when writing).
     pub fn ensure_dirs(&self) -> std::io::Result<()> {
         std::fs::create_dir_all(&self.data_dir)?;
-        std::fs::create_dir_all(&self.exports_dir)?;
         Ok(())
     }
 }

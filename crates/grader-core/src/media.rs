@@ -173,20 +173,45 @@ fn find_in_path(binary_name: &str) -> Option<PathBuf> {
     None
 }
 
-/// Dựng tham số CLI `ffmpeg` cho tách MP3 (giúp kiểm thử deterministic không cần chạy subprocess).
-pub fn build_extract_mp3_args(
+fn is_mp4_family(path: &Path) -> bool {
+    matches!(
+        path.extension()
+            .and_then(|s| s.to_str())
+            .map(|s| s.to_ascii_lowercase())
+            .as_deref(),
+        Some("mp4" | "mov" | "m4v")
+    )
+}
+
+fn is_mp3_file(path: &Path) -> bool {
+    matches!(
+        path.extension()
+            .and_then(|s| s.to_str())
+            .map(|s| s.to_ascii_lowercase())
+            .as_deref(),
+        Some("mp3")
+    )
+}
+
+fn resolve_target_path(
+    default_dir: &Path,
+    default_file_name: String,
+    out_path_override: Option<&Path>,
+) -> PathBuf {
+    match out_path_override {
+        Some(p) if !p.as_os_str().is_empty() => p.to_path_buf(),
+        _ => default_dir.join(default_file_name),
+    }
+}
+
+/// Dựng tham số CLI `ffmpeg` cho tách MP3 với đường dẫn xuất chỉ định.
+pub fn build_extract_mp3_args_to(
     video_path: &Path,
     preset_key: &str,
-    out_dir: &Path,
-) -> (Vec<String>, PathBuf) {
+    out_path: &Path,
+) -> Vec<String> {
     let cfg = get_mp3_preset(preset_key);
-    let stem = video_path
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or("audio");
-    let out_path = out_dir.join(format!("{}_{}.mp3", stem, cfg.key));
-
-    let args = vec![
+    vec![
         "-y".into(),
         "-i".into(),
         video_path.to_string_lossy().into_owned(),
@@ -203,23 +228,32 @@ pub fn build_extract_mp3_args(
         "pipe:1".into(),
         "-nostats".into(),
         out_path.to_string_lossy().into_owned(),
-    ];
-    (args, out_path)
+    ]
 }
 
-/// Dựng tham số CLI `ffmpeg` cho nén video H.264/AAC (giúp kiểm thử deterministic).
-pub fn build_compress_video_args(
+/// Dựng tham số CLI `ffmpeg` cho tách MP3 từ video (giúp kiểm thử deterministic không cần chạy subprocess).
+pub fn build_extract_mp3_args(
     video_path: &Path,
     preset_key: &str,
     out_dir: &Path,
 ) -> (Vec<String>, PathBuf) {
-    let cfg = get_video_preset(preset_key);
+    let cfg = get_mp3_preset(preset_key);
     let stem = video_path
         .file_stem()
         .and_then(|s| s.to_str())
-        .unwrap_or("video");
-    let out_path = out_dir.join(format!("{}_compressed_{}.mp4", stem, cfg.key));
+        .unwrap_or("audio");
+    let out_path = out_dir.join(format!("{}_{}.mp3", stem, cfg.key));
+    let args = build_extract_mp3_args_to(video_path, preset_key, &out_path);
+    (args, out_path)
+}
 
+/// Dựng tham số CLI `ffmpeg` cho nén video H.264/AAC với đường dẫn xuất chỉ định.
+pub fn build_compress_video_args_to(
+    video_path: &Path,
+    preset_key: &str,
+    out_path: &Path,
+) -> Vec<String> {
+    let cfg = get_video_preset(preset_key);
     let mut args = vec![
         "-y".into(),
         "-i".into(),
@@ -258,7 +292,117 @@ pub fn build_compress_video_args(
         out_path.to_string_lossy().into_owned(),
     ]);
 
+    args
+}
+
+/// Dựng tham số CLI `ffmpeg` cho nén video H.264/AAC (giúp kiểm thử deterministic).
+pub fn build_compress_video_args(
+    video_path: &Path,
+    preset_key: &str,
+    out_dir: &Path,
+) -> (Vec<String>, PathBuf) {
+    let cfg = get_video_preset(preset_key);
+    let stem = video_path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("video");
+    let out_path = out_dir.join(format!("{}_compressed_{}.mp4", stem, cfg.key));
+    let args = build_compress_video_args_to(video_path, preset_key, &out_path);
     (args, out_path)
+}
+
+/// Dựng tham số CLI `ffmpeg` cho cắt đoạn video/audio theo mốc giây.
+pub fn build_trim_media_args_to(
+    input_path: &Path,
+    start_secs: f64,
+    end_secs: Option<f64>,
+    fast_copy: bool,
+    out_path: &Path,
+) -> Result<Vec<String>> {
+    if !start_secs.is_finite() || start_secs < 0.0 {
+        return Err(GraderError::InvalidInput(
+            "Thời điểm bắt đầu phải lớn hơn hoặc bằng 0.".into(),
+        ));
+    }
+    if let Some(end) = end_secs {
+        if !end.is_finite() || end <= start_secs {
+            return Err(GraderError::InvalidInput(
+                "Thời điểm kết thúc phải lớn hơn thời điểm bắt đầu.".into(),
+            ));
+        }
+    }
+
+    let mut args = vec![
+        "-y".into(),
+        "-ss".into(),
+        format!("{start_secs:.3}"),
+        "-i".into(),
+        input_path.to_string_lossy().into_owned(),
+    ];
+
+    if let Some(end) = end_secs {
+        args.push("-t".into());
+        args.push(format!("{:.3}", end - start_secs));
+    }
+
+    if fast_copy {
+        args.extend(["-c".into(), "copy".into()]);
+    } else if is_mp3_file(out_path) {
+        args.extend([
+            "-vn".into(),
+            "-acodec".into(),
+            "libmp3lame".into(),
+            "-b:a".into(),
+            "192k".into(),
+        ]);
+    } else {
+        args.extend([
+            "-c:v".into(),
+            "libx264".into(),
+            "-preset".into(),
+            "fast".into(),
+            "-crf".into(),
+            "23".into(),
+            "-c:a".into(),
+            "aac".into(),
+            "-b:a".into(),
+            "128k".into(),
+        ]);
+        if is_mp4_family(out_path) {
+            args.extend(["-movflags".into(), "+faststart".into()]);
+        }
+    }
+
+    args.extend([
+        "-progress".into(),
+        "pipe:1".into(),
+        "-nostats".into(),
+        out_path.to_string_lossy().into_owned(),
+    ]);
+
+    Ok(args)
+}
+
+/// Dựng tham số CLI `ffmpeg` cho xóa âm thanh khỏi video (`-an`, copy stream nhanh).
+pub fn build_mute_video_args_to(video_path: &Path, out_path: &Path) -> Vec<String> {
+    let mut args = vec![
+        "-y".into(),
+        "-i".into(),
+        video_path.to_string_lossy().into_owned(),
+        "-c:v".into(),
+        "copy".into(),
+        "-an".into(),
+    ];
+    if is_mp4_family(out_path) {
+        args.extend(["-movflags".into(), "+faststart".into()]);
+    }
+    args.extend([
+        "-progress".into(),
+        "pipe:1".into(),
+        "-nostats".into(),
+        out_path.to_string_lossy().into_owned(),
+    ]);
+    args
 }
 
 /// Đọc thời lượng video (giây) từ stderr của `ffmpeg -i`.
@@ -286,31 +430,61 @@ pub fn parse_duration_from_stderr(stderr: &str) -> Option<f64> {
     (total > 0.0).then_some(total)
 }
 
-/// Tách âm thanh MP3 từ video theo preset.
+/// Tách âm thanh MP3 từ video theo preset (lưu vào `out_dir`).
 pub async fn extract_mp3<F>(
     ffmpeg_exe: &Path,
     video_path: &Path,
     preset_key: &str,
     out_dir: &Path,
+    on_progress: F,
+    cancel: Option<&CancellationToken>,
+) -> Result<PathBuf>
+where
+    F: FnMut(MediaProgress) + Send,
+{
+    extract_mp3_to(ffmpeg_exe, video_path, preset_key, out_dir, None, on_progress, cancel).await
+}
+
+fn file_stem_and_ext<'a>(
+    path: &'a Path,
+    fallback_stem: &'a str,
+    fallback_ext: &'a str,
+) -> (&'a str, &'a str) {
+    let stem = path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .filter(|s| !s.is_empty())
+        .unwrap_or(fallback_stem);
+    let ext = path
+        .extension()
+        .and_then(|s| s.to_str())
+        .filter(|s| !s.is_empty())
+        .unwrap_or(fallback_ext);
+    (stem, ext)
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn execute_ffmpeg_media_job<F>(
+    ffmpeg_exe: &Path,
+    out_path: PathBuf,
+    args: Vec<String>,
+    duration_secs: Option<f64>,
+    running_stage: &str,
+    done_stage: &str,
+    err_prefix: &str,
+    is_audio: bool,
     mut on_progress: F,
     cancel: Option<&CancellationToken>,
 ) -> Result<PathBuf>
 where
     F: FnMut(MediaProgress) + Send,
 {
-    if !video_path.exists() {
-        return Err(GraderError::Audio(format!(
-            "Không tìm thấy file video: {}",
-            video_path.display()
-        )));
+    if let Some(parent) = out_path.parent() {
+        tokio::fs::create_dir_all(parent).await?;
     }
-    tokio::fs::create_dir_all(out_dir).await?;
-
-    let duration_secs = probe_duration_secs(ffmpeg_exe, video_path).await;
-    let (args, out_path) = build_extract_mp3_args(video_path, preset_key, out_dir);
 
     on_progress(MediaProgress {
-        stage: "Đang tách âm thanh MP3...".into(),
+        stage: running_stage.into(),
         percent: Some(0.0),
     });
 
@@ -319,73 +493,210 @@ where
         &args,
         &out_path,
         duration_secs,
-        "Đang tách âm thanh MP3...",
+        running_stage,
         &mut on_progress,
         cancel,
     )
     .await
     .map_err(|e| match e {
         GraderError::Cancelled => GraderError::Cancelled,
-        other => GraderError::Audio(format!("Tách âm thanh thất bại: {other}")),
+        other if is_audio => GraderError::Audio(format!("{err_prefix}: {other}")),
+        other => GraderError::Video(format!("{err_prefix}: {other}")),
     })?;
 
     on_progress(MediaProgress {
-        stage: "Tách MP3 hoàn tất.".into(),
+        stage: done_stage.into(),
         percent: Some(100.0),
     });
 
     Ok(out_path)
 }
 
-/// Nén video bằng `ffmpeg` theo preset.
-pub async fn compress_video<F>(
+fn ensure_input_exists(input_path: &Path, is_audio: bool) -> Result<()> {
+    if input_path.exists() {
+        return Ok(());
+    }
+    let msg = format!("Không tìm thấy file nguồn: {}", input_path.display());
+    Err(if is_audio {
+        GraderError::Audio(msg)
+    } else {
+        GraderError::Video(msg)
+    })
+}
+
+/// Tách âm thanh MP3 từ video theo preset với đường dẫn file đầu ra tùy chọn.
+pub async fn extract_mp3_to<F>(
     ffmpeg_exe: &Path,
     video_path: &Path,
     preset_key: &str,
-    out_dir: &Path,
-    mut on_progress: F,
+    default_out_dir: &Path,
+    out_path_override: Option<&Path>,
+    on_progress: F,
     cancel: Option<&CancellationToken>,
 ) -> Result<PathBuf>
 where
     F: FnMut(MediaProgress) + Send,
 {
-    if !video_path.exists() {
-        return Err(GraderError::Video(format!(
-            "Không tìm thấy file video: {}",
-            video_path.display()
-        )));
-    }
-    tokio::fs::create_dir_all(out_dir).await?;
-
+    ensure_input_exists(video_path, true)?;
+    let cfg = get_mp3_preset(preset_key);
+    let (stem, _) = file_stem_and_ext(video_path, "audio", "mp3");
+    let out_path = resolve_target_path(
+        default_out_dir,
+        format!("{stem}_{}.mp3", cfg.key),
+        out_path_override,
+    );
     let duration_secs = probe_duration_secs(ffmpeg_exe, video_path).await;
-    let (args, out_path) = build_compress_video_args(video_path, preset_key, out_dir);
+    let args = build_extract_mp3_args_to(video_path, preset_key, &out_path);
 
-    on_progress(MediaProgress {
-        stage: "Đang nén video...".into(),
-        percent: Some(0.0),
-    });
-
-    run_ffmpeg_with_progress(
+    execute_ffmpeg_media_job(
         ffmpeg_exe,
-        &args,
-        &out_path,
+        out_path,
+        args,
         duration_secs,
-        "Đang nén video...",
-        &mut on_progress,
+        "Đang tách âm thanh MP3...",
+        "Tách MP3 hoàn tất.",
+        "Tách âm thanh thất bại",
+        true,
+        on_progress,
         cancel,
     )
     .await
-    .map_err(|e| match e {
-        GraderError::Cancelled => GraderError::Cancelled,
-        other => GraderError::Video(format!("Nén video thất bại: {other}")),
-    })?;
+}
 
-    on_progress(MediaProgress {
-        stage: "Nén video hoàn tất.".into(),
-        percent: Some(100.0),
-    });
+/// Nén video bằng `ffmpeg` theo preset (lưu vào `out_dir`).
+pub async fn compress_video<F>(
+    ffmpeg_exe: &Path,
+    video_path: &Path,
+    preset_key: &str,
+    out_dir: &Path,
+    on_progress: F,
+    cancel: Option<&CancellationToken>,
+) -> Result<PathBuf>
+where
+    F: FnMut(MediaProgress) + Send,
+{
+    compress_video_to(ffmpeg_exe, video_path, preset_key, out_dir, None, on_progress, cancel).await
+}
 
-    Ok(out_path)
+/// Nén video bằng `ffmpeg` theo preset với đường dẫn file đầu ra tùy chọn.
+pub async fn compress_video_to<F>(
+    ffmpeg_exe: &Path,
+    video_path: &Path,
+    preset_key: &str,
+    default_out_dir: &Path,
+    out_path_override: Option<&Path>,
+    on_progress: F,
+    cancel: Option<&CancellationToken>,
+) -> Result<PathBuf>
+where
+    F: FnMut(MediaProgress) + Send,
+{
+    ensure_input_exists(video_path, false)?;
+    let cfg = get_video_preset(preset_key);
+    let (stem, _) = file_stem_and_ext(video_path, "video", "mp4");
+    let out_path = resolve_target_path(
+        default_out_dir,
+        format!("{stem}_compressed_{}.mp4", cfg.key),
+        out_path_override,
+    );
+    let duration_secs = probe_duration_secs(ffmpeg_exe, video_path).await;
+    let args = build_compress_video_args_to(video_path, preset_key, &out_path);
+
+    execute_ffmpeg_media_job(
+        ffmpeg_exe,
+        out_path,
+        args,
+        duration_secs,
+        "Đang nén video...",
+        "Nén video hoàn tất.",
+        "Nén video thất bại",
+        false,
+        on_progress,
+        cancel,
+    )
+    .await
+}
+
+/// Cắt đoạn video/audio theo khoảng thời gian `[start_secs, end_secs]`.
+#[allow(clippy::too_many_arguments)]
+pub async fn trim_media_to<F>(
+    ffmpeg_exe: &Path,
+    input_path: &Path,
+    start_secs: f64,
+    end_secs: Option<f64>,
+    fast_copy: bool,
+    default_out_dir: &Path,
+    out_path_override: Option<&Path>,
+    on_progress: F,
+    cancel: Option<&CancellationToken>,
+) -> Result<PathBuf>
+where
+    F: FnMut(MediaProgress) + Send,
+{
+    ensure_input_exists(input_path, false)?;
+    let (stem, ext) = file_stem_and_ext(input_path, "media", "mp4");
+    let out_path = resolve_target_path(
+        default_out_dir,
+        format!("{stem}_trim.{ext}"),
+        out_path_override,
+    );
+    let args = build_trim_media_args_to(input_path, start_secs, end_secs, fast_copy, &out_path)?;
+    let total_dur = probe_duration_secs(ffmpeg_exe, input_path).await;
+    let target_dur = match end_secs {
+        Some(e) => Some((e - start_secs).max(0.1)),
+        None => total_dur.map(|d| (d - start_secs).max(0.1)),
+    };
+
+    execute_ffmpeg_media_job(
+        ffmpeg_exe,
+        out_path,
+        args,
+        target_dur,
+        "Đang cắt đoạn media...",
+        "Cắt đoạn hoàn tất.",
+        "Cắt đoạn thất bại",
+        false,
+        on_progress,
+        cancel,
+    )
+    .await
+}
+
+/// Xóa âm thanh khỏi video (giữ nguyên video stream, xử lý cực nhanh).
+pub async fn mute_video_to<F>(
+    ffmpeg_exe: &Path,
+    video_path: &Path,
+    default_out_dir: &Path,
+    out_path_override: Option<&Path>,
+    on_progress: F,
+    cancel: Option<&CancellationToken>,
+) -> Result<PathBuf>
+where
+    F: FnMut(MediaProgress) + Send,
+{
+    ensure_input_exists(video_path, false)?;
+    let (stem, ext) = file_stem_and_ext(video_path, "video", "mp4");
+    let out_path = resolve_target_path(
+        default_out_dir,
+        format!("{stem}_muted.{ext}"),
+        out_path_override,
+    );
+    let duration_secs = probe_duration_secs(ffmpeg_exe, video_path).await;
+    let args = build_mute_video_args_to(video_path, &out_path);
+
+    execute_ffmpeg_media_job(
+        ffmpeg_exe,
+        out_path,
+        args,
+        duration_secs,
+        "Đang tắt tiếng video...",
+        "Tắt tiếng video hoàn tất.",
+        "Tắt tiếng video thất bại",
+        false,
+        on_progress,
+        cancel,
+    )
+    .await
 }
 
 async fn run_ffmpeg_with_progress<F>(
