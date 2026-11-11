@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { api, MEDIA_RES_OPTIONS } from "./lib/api";
 import type { AppBootstrap } from "./lib/types";
+import { SelectField } from "./components/SelectField";
 import { ThemeSwitcher } from "./components/ThemeSwitcher";
 import { GradePage } from "./pages/GradePage";
 import { HistoryPage } from "./pages/HistoryPage";
@@ -217,17 +218,14 @@ export function App() {
                     <label className="shrink-0 text-[11px] font-semibold text-slate-500">
                       Model:
                     </label>
-                    <select
+                    <SelectField
                       value={selectedModel}
-                      onChange={(e) => setSelectedModel(e.target.value)}
-                      className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs"
-                    >
-                      {models.map((m) => (
-                        <option key={m} value={m}>
-                          {m}
-                        </option>
-                      ))}
-                    </select>
+                      onChange={setSelectedModel}
+                      options={models.map((m) => ({ value: m, label: m }))}
+                      size="xs"
+                      className="min-w-0 flex-1"
+                      ariaLabel="Chọn model"
+                    />
                     <button
                       type="button"
                       onClick={handleRefreshModels}
@@ -248,17 +246,17 @@ export function App() {
                     <label className="shrink-0 text-[11px] font-semibold text-slate-500">
                       Quan sát:
                     </label>
-                    <select
+                    <SelectField
                       value={mediaRes}
-                      onChange={(e) => setMediaRes(e.target.value)}
-                      className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs"
-                    >
-                      {MEDIA_RES_OPTIONS.map((o) => (
-                        <option key={o.value} value={o.value}>
-                          {o.label}
-                        </option>
-                      ))}
-                    </select>
+                      onChange={setMediaRes}
+                      options={MEDIA_RES_OPTIONS.map((o) => ({
+                        value: o.value,
+                        label: o.label,
+                      }))}
+                      size="xs"
+                      className="min-w-0 flex-1"
+                      ariaLabel="Mức độ quan sát media"
+                    />
                   </div>
                 </div>
               </div>

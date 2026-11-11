@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { ProgressPanel } from "../components/ProgressPanel";
 import { ResultView } from "../components/ResultView";
+import { SelectField } from "../components/SelectField";
 import { api, LANG_LABELS, TASK_LABELS } from "../lib/api";
 import { getParentDir, VIDEO_EXTENSIONS } from "../lib/mediaUtils";
 import { useFileDrop } from "../lib/useFileDrop";
@@ -328,17 +329,16 @@ export function GradePage({
                     ⚠️ Chưa tìm thấy ffmpeg. Hãy cài ffmpeg hoặc cấu hình trong tab Cài đặt.
                   </p>
                 )}
-                <select
+                <SelectField
                   value={compressPreset}
-                  onChange={(e) => setCompressPreset(e.target.value)}
-                  className="w-full rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs text-slate-800"
-                >
-                  {videoPresets.map((p) => (
-                    <option key={p.key} value={p.key}>
-                      {p.label}
-                    </option>
-                  ))}
-                </select>
+                  onChange={setCompressPreset}
+                  options={videoPresets.map((p) => ({
+                    value: p.key,
+                    label: p.label,
+                  }))}
+                  size="xs"
+                  ariaLabel="Preset nén video"
+                />
                 <button
                   type="button"
                   onClick={handleCompressInline}
@@ -360,17 +360,18 @@ export function GradePage({
             <label className="block text-xs font-semibold text-slate-600">
               Rubric (tiêu chuẩn chấm)
             </label>
-            <select
+            <SelectField
               value={rubricId}
-              onChange={(e) => setRubricId(e.target.value)}
-              className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-sm"
-            >
-              {rubrics.map((r) => (
-                <option key={r.id} value={r.id}>
-                  {r.is_builtin ? "[Mặc định]" : "[Tùy chỉnh]"} {r.name}
-                </option>
-              ))}
-            </select>
+              onChange={setRubricId}
+              options={rubrics.map((r) => ({
+                value: r.id,
+                label: r.name,
+                badge: r.is_builtin ? "Mặc định" : "Tùy chỉnh",
+              }))}
+              size="sm"
+              className="mt-1 w-full"
+              ariaLabel="Rubric tiêu chuẩn chấm"
+            />
           </div>
 
           <div className="grid grid-cols-2 gap-2.5">
@@ -378,33 +379,33 @@ export function GradePage({
               <label className="block text-xs font-semibold text-slate-600">
                 Loại bài nói
               </label>
-              <select
+              <SelectField
                 value={taskType}
-                onChange={(e) => setTaskType(e.target.value)}
-                className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm"
-              >
-                {Object.entries(TASK_LABELS).map(([k, label]) => (
-                  <option key={k} value={k}>
-                    {label}
-                  </option>
-                ))}
-              </select>
+                onChange={setTaskType}
+                options={Object.entries(TASK_LABELS).map(([k, label]) => ({
+                  value: k,
+                  label,
+                }))}
+                size="sm"
+                className="mt-1 w-full"
+                ariaLabel="Loại bài nói"
+              />
             </div>
             <div>
               <label className="block text-xs font-semibold text-slate-600">
                 Ngôn ngữ nhận xét
               </label>
-              <select
+              <SelectField
                 value={feedbackLang}
-                onChange={(e) => setFeedbackLang(e.target.value)}
-                className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm"
-              >
-                {Object.entries(LANG_LABELS).map(([k, label]) => (
-                  <option key={k} value={k}>
-                    {label}
-                  </option>
-                ))}
-              </select>
+                onChange={setFeedbackLang}
+                options={Object.entries(LANG_LABELS).map(([k, label]) => ({
+                  value: k,
+                  label,
+                }))}
+                size="sm"
+                className="mt-1 w-full"
+                ariaLabel="Ngôn ngữ nhận xét"
+              />
             </div>
           </div>
 

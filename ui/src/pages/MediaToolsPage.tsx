@@ -18,6 +18,7 @@ import {
   type OutputTargetState,
 } from "../components/OutputLocationPicker";
 import { ProgressPanel } from "../components/ProgressPanel";
+import { SelectField } from "../components/SelectField";
 import { api } from "../lib/api";
 import {
   formatDuration,
@@ -453,17 +454,17 @@ export function MediaToolsPage({
                     <label className="block text-xs font-semibold text-slate-700">
                       Cấu hình nén video MP4 (H.264 + AAC)
                     </label>
-                    <select
+                    <SelectField
                       value={compPreset}
-                      onChange={(e) => setCompPreset(e.target.value)}
-                      className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
-                    >
-                      {videoPresets.map((p) => (
-                        <option key={p.key} value={p.key}>
-                          {p.label}
-                        </option>
-                      ))}
-                    </select>
+                      onChange={setCompPreset}
+                      options={videoPresets.map((p) => ({
+                        value: p.key,
+                        label: p.label,
+                      }))}
+                      size="md"
+                      className="mt-1 w-full"
+                      ariaLabel="Preset nén video"
+                    />
                   </div>
                   <p className="text-xs text-slate-500">
                     Giảm mạnh dung lượng để gửi Gemini nhanh hơn hoặc chia sẻ dễ dàng mà vẫn giữ rõ lời nói.
@@ -477,17 +478,17 @@ export function MediaToolsPage({
                     <label className="block text-xs font-semibold text-slate-700">
                       Chất lượng âm thanh MP3
                     </label>
-                    <select
+                    <SelectField
                       value={mp3Preset}
-                      onChange={(e) => setMp3Preset(e.target.value)}
-                      className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
-                    >
-                      {mp3Presets.map((p) => (
-                        <option key={p.key} value={p.key}>
-                          {p.label}
-                        </option>
-                      ))}
-                    </select>
+                      onChange={setMp3Preset}
+                      options={mp3Presets.map((p) => ({
+                        value: p.key,
+                        label: p.label,
+                      }))}
+                      size="md"
+                      className="mt-1 w-full"
+                      ariaLabel="Chất lượng xuất âm thanh MP3"
+                    />
                   </div>
                   <p className="text-xs text-slate-500">
                     Mức <strong>Nhỏ gọn</strong> &amp; <strong>Cân bằng</strong> dùng mono để tối ưu cho giọng nói và giảm một nửa dung lượng file.

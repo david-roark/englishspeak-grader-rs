@@ -10,6 +10,7 @@ import {
   Sun,
 } from "lucide-react";
 import { api, LANG_LABELS, MEDIA_RES_OPTIONS, TASK_LABELS } from "../lib/api";
+import { SelectField } from "../components/SelectField";
 import {
   THEME_ACCENTS,
   THEME_MODES,
@@ -303,17 +304,17 @@ export function SettingsPage({
               <label className="block text-xs font-semibold text-slate-600">
                 Cấp độ quan sát mặc định
               </label>
-              <select
+              <SelectField
                 value={mediaRes}
-                onChange={(e) => setMediaRes(e.target.value)}
-                className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm"
-              >
-                {MEDIA_RES_OPTIONS.map((o) => (
-                  <option key={o.value} value={o.value}>
-                    {o.label}
-                  </option>
-                ))}
-              </select>
+                onChange={setMediaRes}
+                options={MEDIA_RES_OPTIONS.map((o) => ({
+                  value: o.value,
+                  label: o.label,
+                }))}
+                size="sm"
+                className="mt-1 w-full"
+                ariaLabel="Cấp độ quan sát mặc định"
+              />
             </div>
 
             <div>
