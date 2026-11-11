@@ -1,4 +1,5 @@
 import { ExternalLink, FolderOpen } from "lucide-react";
+import { LocalMediaPlayer } from "./LocalMediaPlayer";
 import { api } from "../lib/api";
 import { isAudioFilePath } from "../lib/mediaUtils";
 import type { MediaOutput } from "../lib/types";
@@ -61,19 +62,15 @@ export function MediaResultCard({ output, actionLabel }: MediaResultCardProps) {
         </div>
       </div>
 
-      {isAudio ? (
-        <audio
-          src={api.mediaUrl(output.output_path)}
-          controls
-          className="w-full"
-        />
-      ) : (
-        <video
-          src={api.mediaUrl(output.output_path)}
-          controls
-          className="aspect-video max-h-[300px] w-full rounded-lg bg-black object-contain"
-        />
-      )}
+      <LocalMediaPlayer
+        path={output.output_path}
+        kind={isAudio ? "audio" : "video"}
+        className={
+          isAudio
+            ? "w-full"
+            : "aspect-video max-h-[300px] w-full rounded-lg bg-black object-contain"
+        }
+      />
     </div>
   );
 }

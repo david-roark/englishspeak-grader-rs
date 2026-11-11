@@ -8,6 +8,7 @@ import {
   Scissors,
   VolumeX,
 } from "lucide-react";
+import { LocalMediaPlayer } from "../components/LocalMediaPlayer";
 import { MediaDropZone } from "../components/MediaDropZone";
 import { MediaResultCard } from "../components/MediaResultCard";
 import {
@@ -361,23 +362,16 @@ export function MediaToolsPage({
             />
 
             {sourceFile && (
-              <div className="space-y-1.5">
-                {isSourceAudio ? (
-                  <audio
-                    ref={playerRef}
-                    src={api.mediaUrl(sourceFile.path)}
-                    controls
-                    className="w-full"
-                  />
-                ) : (
-                  <video
-                    ref={playerRef}
-                    src={api.mediaUrl(sourceFile.path)}
-                    controls
-                    className="aspect-video max-h-[240px] w-full rounded-lg bg-black object-contain"
-                  />
-                )}
-              </div>
+              <LocalMediaPlayer
+                ref={playerRef}
+                path={sourceFile.path}
+                kind={isSourceAudio ? "audio" : "video"}
+                className={
+                  isSourceAudio
+                    ? "w-full"
+                    : "aspect-video max-h-[240px] w-full rounded-lg bg-black object-contain"
+                }
+              />
             )}
           </div>
 

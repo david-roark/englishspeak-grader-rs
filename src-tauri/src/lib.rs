@@ -1,4 +1,5 @@
 mod commands;
+mod media_server;
 mod state;
 
 use state::AppState;

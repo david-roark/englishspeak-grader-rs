@@ -8,6 +8,7 @@ import {
   Rocket,
   Upload,
 } from "lucide-react";
+import { LocalMediaPlayer } from "../components/LocalMediaPlayer";
 import { ProgressPanel } from "../components/ProgressPanel";
 import { ResultView } from "../components/ResultView";
 import { SelectField } from "../components/SelectField";
@@ -274,10 +275,10 @@ export function GradePage({
 
           {videoInfo ? (
             <div className="mt-2.5 space-y-2">
-              <video
+              <LocalMediaPlayer
                 ref={videoRef}
-                src={api.mediaUrl(videoInfo.path)}
-                controls
+                path={videoInfo.path}
+                kind="video"
                 className="aspect-video max-h-[280px] w-full rounded-lg bg-black object-contain"
               />
               <div className="flex items-center justify-between gap-2 rounded-lg bg-slate-50 px-3 py-1.5 text-xs text-slate-700">

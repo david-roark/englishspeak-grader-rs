@@ -146,6 +146,8 @@ export interface AppBootstrap {
   prompt_profile: PromptProfile;
   prompt_profiles: PromptProfile[];
   active_prompt_profile_id: string;
+  media_base_url: string;
+  media_token: string;
 }
 
 export interface FileInfo {

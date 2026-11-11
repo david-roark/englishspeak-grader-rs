@@ -35,8 +35,19 @@ export const MEDIA_RES_OPTIONS = [
   { value: "high", label: "Cao — chi tiết nhất, tốn token nhất" },
 ];
 
+let mediaServerConfig: { baseUrl: string; token: string } | null = null;
+
 export const api = {
-  getBootstrap: () => invoke<AppBootstrap>("get_bootstrap"),
+  getBootstrap: async () => {
+    const boot = await invoke<AppBootstrap>("get_bootstrap");
+    if (boot.media_base_url && boot.media_token) {
+      mediaServerConfig = {
+        baseUrl: boot.media_base_url,
+        token: boot.media_token,
+      };
+    }
+    return boot;
+  },
   inspectFile: (path: string) => invoke<FileInfo>("inspect_file", { path }),
   fetchModels: (apiKey?: string) =>
     invoke<string[]>("fetch_models", { apiKey: apiKey || null }),
@@ -318,5 +329,11 @@ export const api = {
 
   openLocalFile: (path: string) => openPath(path),
   revealInFolder: (path: string) => revealItemInDir(path),
-  mediaUrl: (path: string) => convertFileSrc(path),
+  mediaUrl: (path: string) => {
+    if (mediaServerConfig) {
+      const fileName = path.split(/[/\\]/).pop() || "media";
+      return `${mediaServerConfig.baseUrl}/media/${encodeURIComponent(fileName)}?token=${encodeURIComponent(mediaServerConfig.token)}&path=${encodeURIComponent(path)}`;
+    }
+    return convertFileSrc(path);
+  },
 };

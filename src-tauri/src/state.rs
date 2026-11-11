@@ -5,10 +5,13 @@ use grader_core::{AppPaths, Database, UploadCache};
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 
+use crate::media_server::MediaServer;
+
 pub struct AppState {
     pub paths: AppPaths,
     pub db: Database,
     pub upload_cache: UploadCache,
+    pub media_server: MediaServer,
     cancel_tokens: Mutex<HashMap<String, CancellationToken>>,
 }
 
@@ -28,10 +31,14 @@ impl AppState {
         db.init()
             .map_err(|e| format!("Không khởi tạo được SQLite: {e}"))?;
 
+        let media_server = MediaServer::start()
+            .map_err(|e| format!("Không khởi động được media server nội bộ: {e}"))?;
+
         Ok(Self {
             paths,
             db,
             upload_cache: UploadCache::new(),
+            media_server,
             cancel_tokens: Mutex::new(HashMap::new()),
         })
     }

@@ -32,6 +32,8 @@ pub struct AppBootstrap {
     pub prompt_profile: PromptProfile,
     pub prompt_profiles: Vec<PromptProfile>,
     pub active_prompt_profile_id: String,
+    pub media_base_url: String,
+    pub media_token: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -164,6 +166,8 @@ pub fn get_bootstrap(state: State<'_, AppState>) -> Result<AppBootstrap, String>
         prompt_profile,
         prompt_profiles,
         active_prompt_profile_id,
+        media_base_url: state.media_server.base_url(),
+        media_token: state.media_server.token().to_string(),
     })
 }
 
@@ -176,13 +180,14 @@ fn parse_student_names(raw: &str) -> Vec<String> {
 }
 
 #[tauri::command]
-pub fn inspect_file(path: String) -> Result<FileInfo, String> {
+pub fn inspect_file(state: State<'_, AppState>, path: String) -> Result<FileInfo, String> {
     let p = Path::new(&path);
     if !p.exists() {
         return Err(format!("Không tìm thấy file: {path}"));
     }
     let meta = std::fs::metadata(p).map_err(|e| format!("Không đọc được file: {e}"))?;
     let size_bytes = meta.len();
+    state.media_server.authorize_path(p);
     let name = p
         .file_name()
         .and_then(|s| s.to_str())
@@ -221,6 +226,7 @@ pub async fn grade_video_cmd(
     if !video_path.is_file() {
         return Err("Chưa chọn file video hợp lệ.".into());
     }
+    state.media_server.authorize_path(&video_path);
 
     let rubric = state
         .db
@@ -376,7 +382,13 @@ fn resolve_media_output_targets(
     (out_dir, out_file)
 }
 
-fn build_media_output(out_path: PathBuf, orig_size_mb: f64, fallback_name: &str) -> MediaOutput {
+fn build_media_output(
+    state: &AppState,
+    out_path: PathBuf,
+    orig_size_mb: f64,
+    fallback_name: &str,
+) -> MediaOutput {
+    state.media_server.authorize_path(&out_path);
     let size_bytes = std::fs::metadata(&out_path).map(|m| m.len()).unwrap_or(0);
     let file_name = out_path
         .file_name()
@@ -435,7 +447,7 @@ pub async fn compress_video_cmd(
     state.finish_task(&task_id).await;
 
     let out_path = res.map_err(|e| e.to_string())?;
-    Ok(build_media_output(out_path, orig_size_mb, "compressed.mp4"))
+    Ok(build_media_output(&state, out_path, orig_size_mb, "compressed.mp4"))
 }
 
 #[tauri::command]
@@ -470,7 +482,7 @@ pub async fn extract_mp3_cmd(
     state.finish_task(&task_id).await;
 
     let out_path = res.map_err(|e| e.to_string())?;
-    Ok(build_media_output(out_path, orig_size_mb, "audio.mp3"))
+    Ok(build_media_output(&state, out_path, orig_size_mb, "audio.mp3"))
 }
 
 #[tauri::command]
@@ -510,7 +522,7 @@ pub async fn trim_media_cmd(
     state.finish_task(&task_id).await;
 
     let out_path = res.map_err(|e| e.to_string())?;
-    Ok(build_media_output(out_path, orig_size_mb, "trimmed.mp4"))
+    Ok(build_media_output(&state, out_path, orig_size_mb, "trimmed.mp4"))
 }
 
 #[tauri::command]
@@ -543,7 +555,7 @@ pub async fn mute_video_cmd(
     state.finish_task(&task_id).await;
 
     let out_path = res.map_err(|e| e.to_string())?;
-    Ok(build_media_output(out_path, orig_size_mb, "muted.mp4"))
+    Ok(build_media_output(&state, out_path, orig_size_mb, "muted.mp4"))
 }
 
 #[tauri::command]
@@ -597,11 +609,15 @@ pub fn list_assessments(
 
 #[tauri::command]
 pub fn get_assessment(state: State<'_, AppState>, id: i64) -> Result<AssessmentDetail, String> {
-    state
+    let detail = state
         .db
         .get_assessment(id)
         .map_err(|e| e.to_string())?
-        .ok_or_else(|| format!("Không tìm thấy bản ghi ID {id}."))
+        .ok_or_else(|| format!("Không tìm thấy bản ghi ID {id}."))?;
+    if let Some(vp) = &detail.video_path {
+        state.media_server.authorize_path(Path::new(vp));
+    }
+    Ok(detail)
 }
 
 #[tauri::command]
