@@ -25,11 +25,20 @@
             window.matchMedia("(prefers-color-scheme: dark)").matches;
           var resolved =
             mode === "system" ? (prefersDark ? "dark" : "light") : mode;
+          var fontSize =
+            typeof parsed.fontSize === "number" &&
+            isFinite(parsed.fontSize) &&
+            parsed.fontSize >= 12 &&
+            parsed.fontSize <= 22
+              ? Math.round(parsed.fontSize)
+              : 16;
           var root = document.documentElement;
           root.dataset.theme = resolved;
           root.dataset.themeMode = mode;
           root.dataset.accent = accent;
+          root.dataset.fontSize = String(fontSize);
           root.style.colorScheme = resolved;
+          root.style.fontSize = fontSize + "px";
         } catch (e) {
           document.documentElement.dataset.theme = "light";
           document.documentElement.dataset.accent = "indigo";

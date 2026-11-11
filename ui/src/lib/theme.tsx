@@ -21,6 +21,29 @@ export type ThemeAccent =
 export interface ThemePreferences {
   mode: ThemeMode;
   accent: ThemeAccent;
+  fontSize: number;
+}
+
+export interface FontSizePreset {
+  size: number;
+  label: string;
+  description: string;
+}
+
+export const MIN_FONT_SIZE = 12;
+export const MAX_FONT_SIZE = 22;
+export const DEFAULT_FONT_SIZE = 16;
+
+export const FONT_SIZE_PRESETS: FontSizePreset[] = [
+  { size: 13, label: "Nhỏ", description: "Hiển thị nhiều thông tin hơn (13px)" },
+  { size: 16, label: "Mặc định", description: "Cân đối chuẩn (16px)" },
+  { size: 18, label: "Lớn", description: "Dễ đọc khi chấm bài lâu (18px)" },
+  { size: 20, label: "Rất lớn", description: "Chữ to rõ nét (20px)" },
+];
+
+export function clampFontSize(val: number): number {
+  if (!Number.isFinite(val)) return DEFAULT_FONT_SIZE;
+  return Math.min(MAX_FONT_SIZE, Math.max(MIN_FONT_SIZE, Math.round(val)));
 }
 
 export interface ThemeModeOption {
@@ -42,6 +65,7 @@ export const THEME_STORAGE_KEY = "englishspeak_grader_theme";
 export const DEFAULT_THEME: ThemePreferences = {
   mode: "system",
   accent: "indigo",
+  fontSize: DEFAULT_FONT_SIZE,
 };
 
 export const THEME_MODES: ThemeModeOption[] = [
@@ -141,7 +165,11 @@ export function loadThemePreferences(): ThemePreferences {
     const accent = parsed.accent && VALID_ACCENTS.has(parsed.accent)
       ? parsed.accent
       : DEFAULT_THEME.accent;
-    return { mode, accent };
+    const fontSize =
+      typeof parsed.fontSize === "number"
+        ? clampFontSize(parsed.fontSize)
+        : DEFAULT_FONT_SIZE;
+    return { mode, accent, fontSize };
   } catch {
     return DEFAULT_THEME;
   }
@@ -160,19 +188,25 @@ export function applyThemeToDocument(
 ): ResolvedThemeMode {
   const resolved = resolveThemeMode(prefs.mode);
   const root = document.documentElement;
+  const fontSize = clampFontSize(prefs.fontSize);
   root.dataset.theme = resolved;
   root.dataset.themeMode = prefs.mode;
   root.dataset.accent = prefs.accent;
+  root.dataset.fontSize = String(fontSize);
   root.style.colorScheme = resolved;
+  root.style.fontSize = `${fontSize}px`;
   return resolved;
 }
 
 interface ThemeContextValue {
   mode: ThemeMode;
   accent: ThemeAccent;
+  fontSize: number;
   resolvedMode: ResolvedThemeMode;
   setMode: (mode: ThemeMode) => void;
   setAccent: (accent: ThemeAccent) => void;
+  setFontSize: (size: number) => void;
+  stepFontSize: (delta: number) => void;
   resetTheme: () => void;
 }
 
@@ -213,6 +247,17 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     setPrefs((prev) => ({ ...prev, accent }));
   }, []);
 
+  const setFontSize = useCallback((size: number) => {
+    setPrefs((prev) => ({ ...prev, fontSize: clampFontSize(size) }));
+  }, []);
+
+  const stepFontSize = useCallback((delta: number) => {
+    setPrefs((prev) => ({
+      ...prev,
+      fontSize: clampFontSize(prev.fontSize + delta),
+    }));
+  }, []);
+
   const resetTheme = useCallback(() => {
     setPrefs(DEFAULT_THEME);
   }, []);
@@ -224,12 +269,25 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     () => ({
       mode: prefs.mode,
       accent: prefs.accent,
+      fontSize: prefs.fontSize,
       resolvedMode,
       setMode,
       setAccent,
+      setFontSize,
+      stepFontSize,
       resetTheme,
     }),
-    [prefs.mode, prefs.accent, resolvedMode, setMode, setAccent, resetTheme]
+    [
+      prefs.mode,
+      prefs.accent,
+      prefs.fontSize,
+      resolvedMode,
+      setMode,
+      setAccent,
+      setFontSize,
+      stepFontSize,
+      resetTheme,
+    ]
   );
 
   return (

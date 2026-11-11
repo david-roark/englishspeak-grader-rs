@@ -2,17 +2,23 @@ import { useState } from "react";
 import {
   Check,
   FolderOpen,
+  Minus,
   Monitor,
   Moon,
   Palette,
+  Plus,
   RotateCcw,
   Save,
   Sun,
+  Type,
 } from "lucide-react";
 import { api, MEDIA_RES_OPTIONS } from "../lib/api";
 import { PromptConfigSection } from "../components/PromptConfigSection";
 import { SelectField } from "../components/SelectField";
 import {
+  FONT_SIZE_PRESETS,
+  MAX_FONT_SIZE,
+  MIN_FONT_SIZE,
   THEME_ACCENTS,
   THEME_MODES,
   useTheme,
@@ -35,8 +41,17 @@ export function SettingsPage({
   bootstrap,
   onBootstrapUpdated,
 }: SettingsPageProps) {
-  const { mode, accent, resolvedMode, setMode, setAccent, resetTheme } =
-    useTheme();
+  const {
+    mode,
+    accent,
+    fontSize,
+    resolvedMode,
+    setMode,
+    setAccent,
+    setFontSize,
+    stepFontSize,
+    resetTheme,
+  } = useTheme();
 
   // App settings state
   const [apiKeyDraft, setApiKeyDraft] = useState("");
@@ -170,6 +185,76 @@ export function SettingsPage({
                       <div className="truncate text-[11px] text-slate-500">
                         {item.description}
                       </div>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Font Size Controls */}
+          <div className="mt-3.5">
+            <div className="flex items-center justify-between gap-2">
+              <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-600">
+                <Type className="h-3.5 w-3.5 text-indigo-600" />
+                Kích thước font chữ
+              </span>
+              <span className="rounded bg-indigo-50 px-2 py-0.5 font-mono text-[11px] font-bold text-indigo-700">
+                {fontSize} px
+              </span>
+            </div>
+
+            <div className="mt-1.5 flex items-center gap-2">
+              <button
+                type="button"
+                disabled={fontSize <= MIN_FONT_SIZE}
+                onClick={() => stepFontSize(-1)}
+                className="inline-flex items-center gap-0.5 rounded-lg border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+                title="Giảm cỡ chữ"
+              >
+                <Minus className="h-3 w-3" />
+                A
+              </button>
+              <input
+                type="range"
+                min={MIN_FONT_SIZE}
+                max={MAX_FONT_SIZE}
+                step={1}
+                value={fontSize}
+                onChange={(e) => setFontSize(Number(e.target.value))}
+                aria-label="Kích thước font chữ"
+                className="min-w-0 flex-1 accent-indigo-600"
+              />
+              <button
+                type="button"
+                disabled={fontSize >= MAX_FONT_SIZE}
+                onClick={() => stepFontSize(1)}
+                className="inline-flex items-center gap-0.5 rounded-lg border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+                title="Tăng cỡ chữ"
+              >
+                <Plus className="h-3 w-3" />
+                A
+              </button>
+            </div>
+
+            <div className="mt-2 grid grid-cols-4 gap-1.5">
+              {FONT_SIZE_PRESETS.map((p) => {
+                const selected = fontSize === p.size;
+                return (
+                  <button
+                    key={p.size}
+                    type="button"
+                    onClick={() => setFontSize(p.size)}
+                    title={p.description}
+                    className={`rounded-lg border px-2 py-1.5 text-center transition ${
+                      selected
+                        ? "border-indigo-400 bg-indigo-50 font-semibold text-indigo-800"
+                        : "border-slate-200 text-slate-700 hover:bg-slate-50"
+                    }`}
+                  >
+                    <div className="text-xs">{p.label}</div>
+                    <div className="font-mono text-[10px] text-slate-500">
+                      {p.size}px
                     </div>
                   </button>
                 );
