@@ -292,6 +292,8 @@ export function App() {
         {tab === "rubrics" && (
           <RubricsPage
             rubrics={bootstrap.rubrics}
+            promptProfiles={bootstrap.prompt_profiles}
+            activePromptProfileId={bootstrap.active_prompt_profile_id}
             onRubricsChanged={(rubrics) =>
               setBootstrap((prev) => (prev ? { ...prev, rubrics } : prev))
             }

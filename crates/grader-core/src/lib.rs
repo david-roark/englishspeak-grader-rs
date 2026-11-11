@@ -23,7 +23,8 @@ pub use media::{
 pub use paths::AppPaths;
 pub use prompts::{build_grading_prompt, build_prompt_parts, PromptParts, PromptProfile};
 pub use rubrics::{
-    builtin_rubrics, fmt_num, format_result_markdown, get_builtin_rubric, Criterion, Rubric,
+    builtin_rubrics, fmt_num, format_result_markdown, get_builtin_rubric, Criterion,
+    CriterionLevel, Rubric,
 };
 pub use schemas::{
     assessment_result_gemini_schema, AssessmentResult, CriterionScore, Evidence, StudentAssessment,

@@ -179,16 +179,20 @@ export const api = {
   resetPromptProfile: () =>
     invoke<AppBootstrap>("reset_prompt_profile"),
   previewGradingPrompt: (params: {
-    profile: PromptProfile;
-    rubricId: string;
+    profile?: PromptProfile;
+    profileId?: string;
+    rubric?: Rubric;
+    rubricId?: string;
     taskType: string;
     feedbackLang: string;
     studentNamesRaw: string;
     extraInstructions: string;
   }) =>
     invoke<PromptParts>("preview_grading_prompt", {
-      profile: params.profile,
-      rubricId: params.rubricId,
+      profile: params.profile ?? null,
+      profileId: params.profileId ?? null,
+      rubric: params.rubric ?? null,
+      rubricId: params.rubricId ?? null,
       taskType: params.taskType,
       feedbackLang: params.feedbackLang,
       studentNamesRaw: params.studentNamesRaw,

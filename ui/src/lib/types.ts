@@ -1,8 +1,16 @@
+export interface CriterionLevel {
+  label: string;
+  score_range: string;
+  description: string;
+}
+
 export interface Criterion {
   name: string;
   description: string;
   min_score: number;
   max_score: number;
+  weight?: number;
+  levels?: CriterionLevel[];
 }
 
 export interface Rubric {
@@ -11,6 +19,9 @@ export interface Rubric {
   description: string;
   scale_note: string;
   is_builtin: boolean;
+  scoring_mode?: string;
+  target_scale?: number | null;
+  rounding_step?: number | null;
   criteria: Criterion[];
 }
 

@@ -657,12 +657,14 @@ impl GeminiClient {
         }
 
         let cleaned = strip_json_fence(text.trim());
-        serde_json::from_str::<AssessmentResult>(cleaned).map_err(|e| {
+        let mut parsed = serde_json::from_str::<AssessmentResult>(cleaned).map_err(|e| {
             let preview: String = cleaned.chars().take(500).collect();
             GraderError::Gemini(format!(
                 "Không đọc được kết quả JSON từ Gemini: {e}\n---\n{preview}"
             ))
-        })
+        })?;
+        rubric.normalize_assessment_result(&mut parsed);
+        Ok(parsed)
     }
 
     /// Xóa file đã upload khỏi Gemini (bỏ qua lỗi).

@@ -732,25 +732,49 @@ pub fn reset_prompt_profile(state: State<'_, AppState>) -> Result<AppBootstrap, 
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub fn preview_grading_prompt(
     state: State<'_, AppState>,
-    profile: PromptProfile,
-    rubric_id: String,
+    profile: Option<PromptProfile>,
+    profile_id: Option<String>,
+    rubric: Option<Rubric>,
+    rubric_id: Option<String>,
     task_type: String,
     feedback_lang: String,
     student_names_raw: String,
     extra_instructions: String,
 ) -> Result<PromptParts, String> {
-    let rubric = state
-        .db
-        .get_rubric(&rubric_id)
-        .map_err(|e| e.to_string())?
-        .ok_or_else(|| format!("Không tìm thấy rubric '{rubric_id}'."))?;
+    let resolved_profile = match profile {
+        Some(p) => p,
+        None => match profile_id.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+            Some(pid) => state
+                .db
+                .get_prompt_profile(pid)
+                .map_err(|e| e.to_string())?
+                .ok_or_else(|| format!("Không tìm thấy Prompt Profile '{pid}'."))?,
+            None => state.db.load_prompt_profile().map_err(|e| e.to_string())?,
+        },
+    };
+    let resolved_rubric = match rubric {
+        Some(r) => r,
+        None => {
+            let rid = rubric_id
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .ok_or_else(|| "Thiếu rubric hoặc rubric_id để xem trước.".to_string())?;
+            state
+                .db
+                .get_rubric(rid)
+                .map_err(|e| e.to_string())?
+                .ok_or_else(|| format!("Không tìm thấy rubric '{rid}'."))?
+        }
+    };
     let student_names = parse_student_names(&student_names_raw);
     let names_opt = (!student_names.is_empty()).then_some(student_names.as_slice());
     Ok(build_prompt_parts(
-        &profile,
-        &rubric,
+        &resolved_profile,
+        &resolved_rubric,
         &task_type,
         &feedback_lang,
         names_opt,

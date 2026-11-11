@@ -9,7 +9,9 @@ use crate::error::{GraderError, Result};
 use crate::prompts::{
     default_strictness, default_temperature, merge_with_default, PromptProfile,
 };
-use crate::rubrics::{builtin_rubrics, Criterion, Rubric};
+use crate::rubrics::{
+    builtin_rubrics, default_scoring_mode, default_weight, Criterion, CriterionLevel, Rubric,
+};
 use crate::schemas::{AssessmentResult, CriterionScore, Evidence, StudentAssessment};
 
 /// Dữ liệu đầu vào khi lưu một lần chấm điểm mới.
@@ -128,13 +130,16 @@ impl Database {
             );
 
             CREATE TABLE IF NOT EXISTS rubrics (
-                id          TEXT PRIMARY KEY,
-                name        TEXT NOT NULL,
-                description TEXT NOT NULL DEFAULT '',
-                scale_note  TEXT NOT NULL DEFAULT '',
-                is_builtin  INTEGER NOT NULL DEFAULT 0,
-                created_at  TEXT NOT NULL,
-                updated_at  TEXT NOT NULL
+                id            TEXT PRIMARY KEY,
+                name          TEXT NOT NULL,
+                description   TEXT NOT NULL DEFAULT '',
+                scale_note    TEXT NOT NULL DEFAULT '',
+                is_builtin    INTEGER NOT NULL DEFAULT 0,
+                scoring_mode  TEXT NOT NULL DEFAULT 'sum',
+                target_scale  REAL,
+                rounding_step REAL,
+                created_at    TEXT NOT NULL,
+                updated_at    TEXT NOT NULL
             );
 
             CREATE TABLE IF NOT EXISTS rubric_criteria (
@@ -144,7 +149,9 @@ impl Database {
                 name        TEXT NOT NULL,
                 description TEXT NOT NULL DEFAULT '',
                 min_score   REAL NOT NULL DEFAULT 0,
-                max_score   REAL NOT NULL
+                max_score   REAL NOT NULL,
+                weight      REAL NOT NULL DEFAULT 1.0,
+                levels_json TEXT NOT NULL DEFAULT '[]'
             );
 
             CREATE TABLE IF NOT EXISTS prompt_profiles (
@@ -221,6 +228,7 @@ impl Database {
             "#,
         )?;
 
+        ensure_rubric_columns(&conn)?;
         ensure_prompt_profile_columns(&conn)?;
 
         let tx = conn.transaction()?;
@@ -294,7 +302,7 @@ impl Database {
     pub fn list_rubrics(&self) -> Result<Vec<Rubric>> {
         let conn = self.connect()?;
         let mut stmt = conn.prepare(
-            "SELECT id, name, description, scale_note, is_builtin
+            "SELECT id, name, description, scale_note, is_builtin, scoring_mode, target_scale, rounding_step
              FROM rubrics
              ORDER BY is_builtin DESC, updated_at DESC, name ASC",
         )?;
@@ -305,12 +313,17 @@ impl Database {
                 row.get::<_, String>(2)?,
                 row.get::<_, String>(3)?,
                 row.get::<_, i64>(4)? != 0,
+                row.get::<_, Option<String>>(5)?
+                    .unwrap_or_else(default_scoring_mode),
+                row.get::<_, Option<f64>>(6)?,
+                row.get::<_, Option<f64>>(7)?,
             ))
         })?;
 
         let mut rubrics = Vec::new();
         for row in rows {
-            let (id, name, description, scale_note, is_builtin) = row?;
+            let (id, name, description, scale_note, is_builtin, scoring_mode, target_scale, rounding_step) =
+                row?;
             let criteria = load_criteria(&conn, &id)?;
             rubrics.push(Rubric {
                 id,
@@ -318,6 +331,9 @@ impl Database {
                 description,
                 scale_note,
                 is_builtin,
+                scoring_mode,
+                target_scale,
+                rounding_step,
                 criteria,
             });
         }
@@ -328,7 +344,8 @@ impl Database {
         let conn = self.connect()?;
         let row = conn
             .query_row(
-                "SELECT id, name, description, scale_note, is_builtin FROM rubrics WHERE id = ?1",
+                "SELECT id, name, description, scale_note, is_builtin, scoring_mode, target_scale, rounding_step
+                 FROM rubrics WHERE id = ?1",
                 params![id],
                 |row| {
                     Ok((
@@ -337,13 +354,17 @@ impl Database {
                         row.get::<_, String>(2)?,
                         row.get::<_, String>(3)?,
                         row.get::<_, i64>(4)? != 0,
+                        row.get::<_, Option<String>>(5)?
+                            .unwrap_or_else(default_scoring_mode),
+                        row.get::<_, Option<f64>>(6)?,
+                        row.get::<_, Option<f64>>(7)?,
                     ))
                 },
             )
             .optional()?;
 
         match row {
-            Some((id, name, description, scale_note, is_builtin)) => {
+            Some((id, name, description, scale_note, is_builtin, scoring_mode, target_scale, rounding_step)) => {
                 let criteria = load_criteria(&conn, &id)?;
                 Ok(Some(Rubric {
                     id,
@@ -351,6 +372,9 @@ impl Database {
                     description,
                     scale_note,
                     is_builtin,
+                    scoring_mode,
+                    target_scale,
+                    rounding_step,
                     criteria,
                 }))
             }
@@ -420,6 +444,9 @@ impl Database {
             description: source.description,
             scale_note: source.scale_note,
             is_builtin: false,
+            scoring_mode: source.scoring_mode,
+            target_scale: source.target_scale,
+            rounding_step: source.rounding_step,
             criteria: source.criteria,
         };
         self.save_custom_rubric(&cloned)?;
@@ -900,14 +927,24 @@ fn now_iso() -> String {
 }
 
 fn upsert_rubric_tx(tx: &rusqlite::Transaction<'_>, rubric: &Rubric, now: &str) -> Result<()> {
+    let scoring_mode = if rubric.scoring_mode == "weighted_avg" {
+        "weighted_avg"
+    } else {
+        "sum"
+    };
+    let target_scale = rubric.target_scale.filter(|s| s.is_finite() && *s > 0.0);
+    let rounding_step = rubric.rounding_step.filter(|s| s.is_finite() && *s > 0.0);
     tx.execute(
-        "INSERT INTO rubrics (id, name, description, scale_note, is_builtin, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6)
+        "INSERT INTO rubrics (id, name, description, scale_note, is_builtin, scoring_mode, target_scale, rounding_step, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9)
          ON CONFLICT(id) DO UPDATE SET
              name = excluded.name,
              description = excluded.description,
              scale_note = excluded.scale_note,
              is_builtin = excluded.is_builtin,
+             scoring_mode = excluded.scoring_mode,
+             target_scale = excluded.target_scale,
+             rounding_step = excluded.rounding_step,
              updated_at = excluded.updated_at",
         params![
             rubric.id,
@@ -915,6 +952,9 @@ fn upsert_rubric_tx(tx: &rusqlite::Transaction<'_>, rubric: &Rubric, now: &str) 
             rubric.description,
             rubric.scale_note,
             if rubric.is_builtin { 1i64 } else { 0i64 },
+            scoring_mode,
+            target_scale,
+            rounding_step,
             now,
         ],
     )?;
@@ -925,9 +965,15 @@ fn upsert_rubric_tx(tx: &rusqlite::Transaction<'_>, rubric: &Rubric, now: &str) 
     )?;
 
     for (idx, c) in rubric.criteria.iter().enumerate() {
+        let weight = if c.weight.is_finite() && c.weight > 0.0 {
+            c.weight
+        } else {
+            default_weight()
+        };
+        let levels_json = serde_json::to_string(&c.levels)?;
         tx.execute(
-            "INSERT INTO rubric_criteria (rubric_id, sort_order, name, description, min_score, max_score)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            "INSERT INTO rubric_criteria (rubric_id, sort_order, name, description, min_score, max_score, weight, levels_json)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
             params![
                 rubric.id,
                 idx as i64,
@@ -935,7 +981,48 @@ fn upsert_rubric_tx(tx: &rusqlite::Transaction<'_>, rubric: &Rubric, now: &str) 
                 c.description.trim(),
                 c.min_score,
                 c.max_score,
+                weight,
+                levels_json,
             ],
+        )?;
+    }
+    Ok(())
+}
+
+fn table_has_columns(conn: &Connection, table: &str) -> Result<Vec<String>> {
+    let mut stmt = conn.prepare(&format!("PRAGMA table_info({table})"))?;
+    let cols: Vec<String> = stmt
+        .query_map([], |row| row.get::<_, String>(1))?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    Ok(cols)
+}
+
+fn ensure_rubric_columns(conn: &Connection) -> Result<()> {
+    let r_cols = table_has_columns(conn, "rubrics")?;
+    if !r_cols.iter().any(|c| c == "scoring_mode") {
+        conn.execute(
+            "ALTER TABLE rubrics ADD COLUMN scoring_mode TEXT NOT NULL DEFAULT 'sum'",
+            [],
+        )?;
+    }
+    if !r_cols.iter().any(|c| c == "target_scale") {
+        conn.execute("ALTER TABLE rubrics ADD COLUMN target_scale REAL", [])?;
+    }
+    if !r_cols.iter().any(|c| c == "rounding_step") {
+        conn.execute("ALTER TABLE rubrics ADD COLUMN rounding_step REAL", [])?;
+    }
+
+    let c_cols = table_has_columns(conn, "rubric_criteria")?;
+    if !c_cols.iter().any(|c| c == "weight") {
+        conn.execute(
+            "ALTER TABLE rubric_criteria ADD COLUMN weight REAL NOT NULL DEFAULT 1.0",
+            [],
+        )?;
+    }
+    if !c_cols.iter().any(|c| c == "levels_json") {
+        conn.execute(
+            "ALTER TABLE rubric_criteria ADD COLUMN levels_json TEXT NOT NULL DEFAULT '[]'",
+            [],
         )?;
     }
     Ok(())
@@ -1048,17 +1135,24 @@ fn save_prompt_profile_tx(
 
 fn load_criteria(conn: &Connection, rubric_id: &str) -> Result<Vec<Criterion>> {
     let mut stmt = conn.prepare(
-        "SELECT name, description, min_score, max_score
+        "SELECT name, description, min_score, max_score, weight, levels_json
          FROM rubric_criteria
          WHERE rubric_id = ?1
          ORDER BY sort_order ASC, id ASC",
     )?;
     let rows = stmt.query_map(params![rubric_id], |row| {
+        let weight: f64 = row.get::<_, Option<f64>>(4)?.unwrap_or(1.0);
+        let levels_json: String = row
+            .get::<_, Option<String>>(5)?
+            .unwrap_or_else(|| "[]".to_string());
+        let levels: Vec<CriterionLevel> = serde_json::from_str(&levels_json).unwrap_or_default();
         Ok(Criterion {
             name: row.get(0)?,
             description: row.get(1)?,
             min_score: row.get(2)?,
             max_score: row.get(3)?,
+            weight,
+            levels,
         })
     })?;
     let mut out = Vec::new();

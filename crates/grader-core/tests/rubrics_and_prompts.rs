@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use grader_core::prompts::{build_grading_prompt, build_prompt_parts, merge_with_default, PromptProfile};
 use grader_core::rubrics::{
-    builtin_rubrics, format_result_markdown, get_builtin_rubric, Criterion, Rubric,
+    builtin_rubrics, format_result_markdown, get_builtin_rubric, Criterion, CriterionLevel, Rubric,
 };
 use grader_core::schemas::{
     assessment_result_gemini_schema, AssessmentResult, CriterionScore, Evidence, StudentAssessment,
@@ -83,7 +83,9 @@ fn test_builtin_rubrics_complete_and_valid() {
     );
     let ielts = get_builtin_rubric("ielts_speaking").unwrap();
     assert_eq!(ielts.name, "IELTS Speaking");
-    assert_eq!(ielts.max_total(), 36.0);
+    assert_eq!(ielts.max_total(), 9.0);
+    let classroom = get_builtin_rubric("classroom_10").unwrap();
+    assert_eq!(classroom.max_total(), 10.0);
     assert!(get_builtin_rubric("nonexistent").is_none());
 }
 
@@ -95,8 +97,15 @@ fn test_rubric_max_total_and_prompt_block() {
         description: "Desc".into(),
         scale_note: "0-15".into(),
         is_builtin: false,
+        scoring_mode: "sum".into(),
+        target_scale: None,
+        rounding_step: None,
         criteria: vec![
-            Criterion::new("A", "desc A", 0.0, 5.0),
+            Criterion::new("A", "desc A", 0.0, 5.0).with_levels(vec![CriterionLevel {
+                label: "Tốt".into(),
+                score_range: "4.5–5".into(),
+                description: "Nói rõ ràng".into(),
+            }]),
             Criterion::new("B", "desc B", 0.0, 10.0),
         ],
     };
@@ -104,8 +113,20 @@ fn test_rubric_max_total_and_prompt_block() {
     let block = r.to_prompt_block();
     assert!(block.contains("RUBRIC: Custom"));
     assert!(block.contains("1. A (điểm 0–5): desc A"));
+    assert!(block.contains("Mức Tốt (4.5–5): Nói rõ ràng"));
     assert!(block.contains("Tổng điểm tối đa: 15"));
     assert!(r.to_markdown().contains("### Custom"));
+
+    // Weighted average & normalization test (IELTS: average 6.5, 6.5, 7.0, 7.0 -> 6.75 -> rounds to 7.0)
+    let ielts = get_builtin_rubric("ielts_speaking").unwrap();
+    let (tot, max_tot) = ielts.compute_total_score(&[
+        CriterionScore { criterion: "Fluency and Coherence".into(), score: 6.5, max_score: 9.0, comment: "".into() },
+        CriterionScore { criterion: "Lexical Resource".into(), score: 6.5, max_score: 9.0, comment: "".into() },
+        CriterionScore { criterion: "Grammatical Range and Accuracy".into(), score: 7.0, max_score: 9.0, comment: "".into() },
+        CriterionScore { criterion: "Pronunciation".into(), score: 7.0, max_score: 9.0, comment: "".into() },
+    ]);
+    assert_eq!(max_tot, 9.0);
+    assert_eq!(tot, 7.0);
 }
 
 #[test]

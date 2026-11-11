@@ -2,7 +2,7 @@ use calamine::{open_workbook, Data, Reader, Xlsx};
 use grader_core::database::{Database, NewAssessment};
 use grader_core::export::{default_export_path, export_to_excel, safe_sheet_title, slug};
 use grader_core::prompts::PromptProfile;
-use grader_core::rubrics::{Criterion, Rubric};
+use grader_core::rubrics::{Criterion, CriterionLevel, Rubric};
 use grader_core::schemas::{AssessmentResult, CriterionScore, Evidence, StudentAssessment};
 use tempfile::TempDir;
 
@@ -104,15 +104,29 @@ fn test_custom_rubric_crud_and_clone() {
         description: "Mô tả".into(),
         scale_note: "0-10".into(),
         is_builtin: false,
+        scoring_mode: "weighted_avg".into(),
+        target_scale: Some(10.0),
+        rounding_step: Some(0.5),
         criteria: vec![
-            Criterion::new("Nội dung", "ý tưởng", 0.0, 10.0),
-            Criterion::new("Phát âm", "rõ", 0.0, 10.0),
+            Criterion::new("Nội dung", "ý tưởng", 0.0, 10.0)
+                .with_weight(60.0)
+                .with_levels(vec![CriterionLevel {
+                    label: "Tốt".into(),
+                    score_range: "8.5–10".into(),
+                    description: "Đủ ý, mạch lạc".into(),
+                }]),
+            Criterion::new("Phát âm", "rõ", 0.0, 10.0).with_weight(40.0),
         ],
     };
     db.save_custom_rubric(&custom).unwrap();
     let loaded = db.get_rubric("my_rubric").unwrap().unwrap();
     assert!(!loaded.is_builtin);
+    assert_eq!(loaded.scoring_mode, "weighted_avg");
+    assert_eq!(loaded.target_scale, Some(10.0));
+    assert_eq!(loaded.rounding_step, Some(0.5));
     assert_eq!(loaded.criteria.len(), 2);
+    assert_eq!(loaded.criteria[0].weight, 60.0);
+    assert_eq!(loaded.criteria[0].levels.len(), 1);
 
     // Clone built-in rubric
     let cloned = db
