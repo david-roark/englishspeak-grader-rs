@@ -59,12 +59,14 @@ export const api = {
     videoPath: string;
     preset: string;
     outDirOverride?: string;
+    outPathOverride?: string;
   }) =>
     invoke<MediaOutput>("compress_video_cmd", {
       taskId: params.taskId,
       videoPath: params.videoPath,
       preset: params.preset,
       outDirOverride: params.outDirOverride || null,
+      outPathOverride: params.outPathOverride || null,
     }),
 
   extractMp3: (params: {
@@ -72,13 +74,50 @@ export const api = {
     videoPath: string;
     preset: string;
     outDirOverride?: string;
+    outPathOverride?: string;
   }) =>
     invoke<MediaOutput>("extract_mp3_cmd", {
       taskId: params.taskId,
       videoPath: params.videoPath,
       preset: params.preset,
       outDirOverride: params.outDirOverride || null,
+      outPathOverride: params.outPathOverride || null,
     }),
+
+  trimMedia: (params: {
+    taskId: string;
+    inputPath: string;
+    startSecs: number;
+    endSecs?: number | null;
+    fastCopy: boolean;
+    outDirOverride?: string;
+    outPathOverride?: string;
+  }) =>
+    invoke<MediaOutput>("trim_media_cmd", {
+      taskId: params.taskId,
+      inputPath: params.inputPath,
+      startSecs: params.startSecs,
+      endSecs: params.endSecs ?? null,
+      fastCopy: params.fastCopy,
+      outDirOverride: params.outDirOverride || null,
+      outPathOverride: params.outPathOverride || null,
+    }),
+
+  muteVideo: (params: {
+    taskId: string;
+    videoPath: string;
+    outDirOverride?: string;
+    outPathOverride?: string;
+  }) =>
+    invoke<MediaOutput>("mute_video_cmd", {
+      taskId: params.taskId,
+      videoPath: params.videoPath,
+      outDirOverride: params.outDirOverride || null,
+      outPathOverride: params.outPathOverride || null,
+    }),
+
+  probeMediaDuration: (path: string) =>
+    invoke<number | null>("probe_media_duration", { path }),
 
   listRubrics: () => invoke<Rubric[]>("list_rubrics"),
   saveCustomRubric: (rubric: Rubric) =>
@@ -162,6 +201,52 @@ export const api = {
       ],
     });
     return typeof selected === "string" ? selected : null;
+  },
+
+  pickMediaFile: async (): Promise<string | null> => {
+    const selected = await open({
+      multiple: false,
+      title: "Chọn file Video hoặc Audio",
+      filters: [
+        {
+          name: "Media (Video & Audio)",
+          extensions: [
+            "mp4",
+            "mov",
+            "webm",
+            "avi",
+            "mkv",
+            "mpeg",
+            "mpg",
+            "wmv",
+            "3gp",
+            "flv",
+            "m4v",
+            "mp3",
+            "wav",
+            "m4a",
+            "aac",
+            "ogg",
+            "flac",
+          ],
+        },
+      ],
+    });
+    return typeof selected === "string" ? selected : null;
+  },
+
+  saveMediaDialog: async (params: {
+    title: string;
+    defaultName: string;
+    filterName: string;
+    extensions: string[];
+  }): Promise<string | null> => {
+    const selected = await save({
+      title: params.title,
+      defaultPath: params.defaultName,
+      filters: [{ name: params.filterName, extensions: params.extensions }],
+    });
+    return selected;
   },
 
   pickFolder: async (title: string): Promise<string | null> => {

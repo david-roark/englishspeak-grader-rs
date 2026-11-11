@@ -87,7 +87,7 @@ export function App() {
   const navItems: { key: TabKey; label: string; icon: typeof Sparkles }[] = [
     { key: "grade", label: "Chấm bài", icon: Sparkles },
     { key: "rubrics", label: "Rubric", icon: BookOpen },
-    { key: "media", label: "Xử lý Video/Audio", icon: Film },
+    { key: "media", label: "Xưởng Media", icon: Film },
     { key: "history", label: "Lịch sử", icon: History },
     { key: "settings", label: "Cài đặt & Prompt", icon: Settings },
   ];
@@ -283,6 +283,9 @@ export function App() {
             rubrics={bootstrap.rubrics}
             videoPresets={bootstrap.video_presets}
             ffmpegAvailable={Boolean(bootstrap.ffmpeg_path)}
+            exportDir={bootstrap.export_dir}
+            hasCustomExportDir={bootstrap.has_custom_export_dir}
+            onBootstrapUpdated={(next) => setBootstrap(next)}
           />
         )}
 
@@ -300,6 +303,8 @@ export function App() {
             videoPresets={bootstrap.video_presets}
             mp3Presets={bootstrap.mp3_presets}
             ffmpegAvailable={Boolean(bootstrap.ffmpeg_path)}
+            defaultExportDir={bootstrap.export_dir}
+            hasCustomExportDir={bootstrap.has_custom_export_dir}
           />
         )}
 

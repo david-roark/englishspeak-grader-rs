@@ -116,6 +116,7 @@ export interface AppBootstrap {
   default_model: string;
   media_resolution: string;
   export_dir: string;
+  has_custom_export_dir: boolean;
   db_path: string;
   ffmpeg_path: string | null;
   ffmpeg_custom_path: string;

@@ -3,6 +3,7 @@ import {
   ChevronDown,
   ChevronRight,
   FileVideo,
+  FolderOpen,
   Minimize2,
   Rocket,
   Upload,
@@ -10,7 +11,10 @@ import {
 import { ProgressPanel } from "../components/ProgressPanel";
 import { ResultView } from "../components/ResultView";
 import { api, LANG_LABELS, TASK_LABELS } from "../lib/api";
+import { getParentDir, VIDEO_EXTENSIONS } from "../lib/mediaUtils";
+import { useFileDrop } from "../lib/useFileDrop";
 import type {
+  AppBootstrap,
   AssessmentDetail,
   FileInfo,
   Rubric,
@@ -24,6 +28,9 @@ interface GradePageProps {
   rubrics: Rubric[];
   videoPresets: VideoPreset[];
   ffmpegAvailable: boolean;
+  exportDir: string;
+  hasCustomExportDir: boolean;
+  onBootstrapUpdated: (next: AppBootstrap) => void;
 }
 
 function parseTimestampToSeconds(ts: string): number | null {
@@ -44,8 +51,12 @@ export function GradePage({
   rubrics,
   videoPresets,
   ffmpegAvailable,
+  exportDir,
+  hasCustomExportDir,
+  onBootstrapUpdated,
 }: GradePageProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const videoDropRef = useRef<HTMLDivElement | null>(null);
 
   const [videoInfo, setVideoInfo] = useState<FileInfo | null>(null);
   const [origFileInfo, setOrigFileInfo] = useState<FileInfo | null>(null);
@@ -71,10 +82,8 @@ export function GradePage({
   const [resultDetail, setResultDetail] = useState<AssessmentDetail | null>(null);
   const [excelPath, setExcelPath] = useState<string | null>(null);
 
-  async function handlePickVideo() {
+  async function loadVideoFromPath(path: string) {
     setErrorMsg("");
-    const path = await api.pickVideoFile();
-    if (!path) return;
     try {
       const info = await api.inspectFile(path);
       setVideoInfo(info);
@@ -84,6 +93,23 @@ export function GradePage({
       setErrorMsg(String(e));
     }
   }
+
+  async function handlePickVideo() {
+    setErrorMsg("");
+    const path = await api.pickVideoFile();
+    if (!path) return;
+    await loadVideoFromPath(path);
+  }
+
+  const { isDraggingOver: isVideoDragging } = useFileDrop({
+    targetRef: videoDropRef,
+    disabled: busyTaskId !== null,
+    acceptedExtensions: VIDEO_EXTENSIONS,
+    onDropFiles: (paths) => {
+      if (paths[0]) void loadVideoFromPath(paths[0]);
+    },
+    onRejected: (msg) => setErrorMsg(msg),
+  });
 
   async function handleCompressInline() {
     const source = origFileInfo ?? videoInfo;
@@ -104,10 +130,14 @@ export function GradePage({
     });
 
     try {
+      const outDirOverride = hasCustomExportDir
+        ? exportDir
+        : getParentDir(source.path) || undefined;
       const out = await api.compressVideo({
         taskId,
         videoPath: source.path,
         preset: compressPreset,
+        outDirOverride,
       });
       const newInfo = await api.inspectFile(out.output_path);
       setVideoInfo(newInfo);
@@ -124,6 +154,19 @@ export function GradePage({
       unlisten();
       setCompressing(false);
       setBusyTaskId(null);
+    }
+  }
+
+  async function handleChooseExportDir() {
+    setErrorMsg("");
+    const dir = await api.pickFolder("Chọn thư mục lưu kết quả mặc định");
+    if (!dir) return;
+    try {
+      const updated = await api.saveSettings({ export_dir: dir });
+      onBootstrapUpdated(updated);
+      setStatusMsg(`✅ Đã lưu thư mục xuất mặc định: ${updated.export_dir}`);
+    } catch (e) {
+      setErrorMsg(String(e));
     }
   }
 
@@ -190,7 +233,14 @@ export function GradePage({
     <div className="grid items-start gap-4 md:grid-cols-12">
       {/* Left column: Controls (sticky on desktop so video stays visible while reading results) */}
       <div className="space-y-3 md:sticky md:top-4 md:col-span-5 xl:col-span-4">
-        <div className="rounded-xl border border-slate-200 bg-white p-3.5 shadow-xs">
+        <div
+          ref={videoDropRef}
+          className={`rounded-xl border bg-white p-3.5 shadow-xs transition ${
+            isVideoDragging
+              ? "border-indigo-500 ring-2 ring-indigo-500/30"
+              : "border-slate-200"
+          }`}
+        >
           <div className="flex items-center justify-between gap-2">
             <h2 className="text-sm font-bold text-slate-800">
               1. Video bài nói của học sinh
@@ -243,7 +293,9 @@ export function GradePage({
             >
               <FileVideo className="h-7 w-7 text-slate-400" />
               <span className="mt-1.5 text-sm font-medium text-slate-700">
-                Bấm để chọn file video (.mp4, .mov, .webm...)
+                {isVideoDragging
+                  ? "Thả video vào đây ngay..."
+                  : "Kéo thả hoặc bấm để chọn file video (.mp4, .mov, .webm...)"}
               </span>
               <span className="mt-0.5 text-xs text-slate-400">
                 Hỗ trợ tối đa 2GB qua Gemini Files API
@@ -380,6 +432,29 @@ export function GradePage({
               placeholder="VD: chú trọng phát âm; bỏ qua phần chào hỏi..."
               className="mt-1 w-full rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm focus:border-indigo-400 focus:outline-none"
             />
+          </div>
+
+          <div className="rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-2">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[11px] font-semibold text-slate-600">
+                Nơi lưu Excel kết quả (tự nhớ)
+              </span>
+              <button
+                type="button"
+                onClick={() => void handleChooseExportDir()}
+                disabled={busyTaskId !== null}
+                className="inline-flex shrink-0 items-center gap-1 rounded-md border border-slate-200 bg-white px-2 py-0.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-100 disabled:opacity-50"
+              >
+                <FolderOpen className="h-3 w-3" />
+                Chọn nơi lưu...
+              </button>
+            </div>
+            <div
+              className="mt-1 truncate text-[11px] text-slate-500"
+              title={exportDir}
+            >
+              <code>{exportDir}</code>
+            </div>
           </div>
 
           <button
