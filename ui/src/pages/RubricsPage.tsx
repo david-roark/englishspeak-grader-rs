@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import {
   ArrowDown,
+  ArrowLeft,
   ArrowUp,
   ChevronDown,
   ChevronRight,
@@ -12,6 +13,7 @@ import {
   Layers,
   Plus,
   Save,
+  Search,
   Sparkles,
   Trash2,
 } from "lucide-react";
@@ -148,6 +150,7 @@ export function RubricsPage({
   const totalWeight = useMemo(() => getTotalWeight(criteria), [criteria]);
 
   function loadForEdit(r: Rubric) {
+    setRightMode("editor");
     setMsg("");
     setErr("");
     setEditingOriginalId(r.id);
@@ -260,6 +263,8 @@ export function RubricsPage({
   }
 
   const [deleteTarget, setDeleteTarget] = useState<Rubric | null>(null);
+  const [rightMode, setRightMode] = useState<"detail" | "editor">("detail");
+  const [searchQuery, setSearchQuery] = useState("");
 
   function handleDelete(r: Rubric) {
     setDeleteTarget(r);
@@ -372,8 +377,8 @@ export function RubricsPage({
       )}
 
       <div className="grid items-start gap-4 md:grid-cols-12">
-        {/* Left: List & selected details */}
-        <div className="space-y-3 md:col-span-5 xl:col-span-4">
+        {/* Left: Full-height Rubric List */}
+        <div className="md:sticky md:top-4 md:col-span-5 xl:col-span-4">
           <div className="rounded-xl border border-slate-200 bg-white p-3.5 shadow-xs">
             <div className="flex items-center justify-between gap-2">
               <h2 className="text-sm font-bold text-slate-800">
@@ -381,224 +386,322 @@ export function RubricsPage({
               </h2>
               <button
                 type="button"
-                onClick={resetForm}
-                className="inline-flex items-center gap-1 rounded-lg bg-indigo-50 px-2.5 py-1.5 text-xs font-semibold text-indigo-700 hover:bg-indigo-100"
+                onClick={() => {
+                  resetForm();
+                  setRightMode("editor");
+                }}
+                className="inline-flex items-center gap-1 rounded-lg bg-indigo-600 px-2.5 py-1.5 text-xs font-semibold text-white shadow-xs hover:bg-indigo-700"
               >
                 <Plus className="h-3.5 w-3.5" />
                 Tạo mới
               </button>
             </div>
 
-            <div className="mt-2.5 max-h-[38vh] space-y-2 overflow-y-auto pr-1">
-              {rubrics.map((r) => {
-                const active = selected?.id === r.id;
-                return (
-                  <div
-                    key={r.id}
-                    onClick={() => setSelectedId(r.id)}
-                    className={`cursor-pointer rounded-xl border p-3 transition ${
-                      active
-                        ? "border-indigo-400 bg-indigo-50/50"
-                        : "border-slate-200 hover:bg-slate-50"
-                    }`}
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="min-w-0">
-                        <div className="flex flex-wrap items-center gap-1.5">
-                          <span className="truncate text-sm font-bold text-slate-900">
-                            {r.name}
-                          </span>
-                          <span
-                            className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
-                              r.is_builtin
-                                ? "bg-slate-100 text-slate-600"
-                                : "bg-indigo-100 text-indigo-700"
-                            }`}
-                          >
-                            {r.is_builtin ? "Mặc định" : "Tùy chỉnh"}
-                          </span>
-                        </div>
-                        <div className="mt-0.5 text-xs text-slate-500">
-                          {r.criteria.length} tiêu chí ·{" "}
-                          <span className="font-medium text-indigo-700">
-                            {formatRubricScoringSummary(r)}
-                          </span>
-                        </div>
-                      </div>
+            <div className="relative mt-2.5">
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Tìm nhanh rubric..."
+                className="w-full rounded-lg border border-slate-200 bg-slate-50/70 py-1.5 pl-8 pr-3 text-xs focus:border-indigo-400 focus:bg-white focus:outline-none"
+              />
+            </div>
 
-                      <div className="flex shrink-0 items-center gap-1">
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            void handleClone(r);
-                          }}
-                          className="rounded-lg p-1.5 text-slate-500 hover:bg-white hover:text-indigo-600"
-                          title="Nhân bản để tùy chỉnh từ mẫu này"
-                        >
-                          <Copy className="h-3.5 w-3.5" />
-                        </button>
-                        {!r.is_builtin && (
-                          <>
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                loadForEdit(r);
-                              }}
-                              className="rounded-lg p-1.5 text-slate-500 hover:bg-white hover:text-indigo-600"
-                              title="Chỉnh sửa rubric này"
+            <div className="mt-2.5 max-h-[calc(100vh-220px)] space-y-2 overflow-y-auto pr-1">
+              {rubrics
+                .filter((r) => {
+                  const q = searchQuery.trim().toLowerCase();
+                  if (!q) return true;
+                  return (
+                    r.name.toLowerCase().includes(q) ||
+                    r.description.toLowerCase().includes(q)
+                  );
+                })
+                .map((r) => {
+                  const active = selected?.id === r.id;
+                  return (
+                    <div
+                      key={r.id}
+                      onClick={() => {
+                        setSelectedId(r.id);
+                        setRightMode("detail");
+                      }}
+                      className={`cursor-pointer rounded-xl border p-3 transition ${
+                        active
+                          ? "border-indigo-400 bg-indigo-50/60 shadow-2xs"
+                          : "border-slate-200 hover:bg-slate-50"
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <span className="truncate text-sm font-bold text-slate-900">
+                              {r.name}
+                            </span>
+                            <span
+                              className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                                r.is_builtin
+                                  ? "bg-slate-100 text-slate-600"
+                                  : "bg-indigo-100 text-indigo-700"
+                              }`}
                             >
-                              <Edit className="h-3.5 w-3.5" />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                void handleDelete(r);
-                              }}
-                              className="rounded-lg p-1.5 text-slate-500 hover:bg-white hover:text-rose-600"
-                              title="Xóa rubric"
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </button>
-                          </>
-                        )}
+                              {r.is_builtin ? "Mặc định" : "Tùy chỉnh"}
+                            </span>
+                          </div>
+                          <div className="mt-0.5 text-xs text-slate-500">
+                            {r.criteria.length} tiêu chí ·{" "}
+                            <span className="font-medium text-indigo-700">
+                              {formatRubricScoringSummary(r)}
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="flex shrink-0 items-center gap-0.5">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              void handleClone(r);
+                            }}
+                            className="rounded-lg p-1.5 text-slate-500 hover:bg-white hover:text-indigo-600"
+                            title="Nhân bản để tùy chỉnh từ mẫu này"
+                          >
+                            <Copy className="h-3.5 w-3.5" />
+                          </button>
+                          {!r.is_builtin && (
+                            <>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  loadForEdit(r);
+                                }}
+                                className="rounded-lg p-1.5 text-slate-500 hover:bg-white hover:text-indigo-600"
+                                title="Chỉnh sửa rubric này"
+                              >
+                                <Edit className="h-3.5 w-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  void handleDelete(r);
+                                }}
+                                className="rounded-lg p-1.5 text-slate-500 hover:bg-white hover:text-rose-600"
+                                title="Xóa rubric"
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </button>
+                            </>
+                          )}
+                        </div>
                       </div>
                     </div>
-                  </div>
-                );
-              })}
+                  );
+                })}
             </div>
           </div>
-
-          {/* Selected rubric details */}
-          {selected && (
-            <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-xs">
-              <div className="flex flex-wrap items-start justify-between gap-2">
-                <div>
-                  <h3 className="text-sm font-bold text-slate-800">
-                    Chi tiết: {selected.name}
-                  </h3>
-                  <div className="mt-0.5 text-[11px] font-medium text-indigo-700">
-                    {formatRubricScoringSummary(selected)}
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setPreviewOpen(true)}
-                  className="inline-flex items-center gap-1 rounded-lg border border-indigo-200 bg-indigo-50 px-2.5 py-1 text-[11px] font-semibold text-indigo-700 hover:bg-indigo-100"
-                >
-                  <Eye className="h-3 w-3" />
-                  Xem Prompt gửi AI
-                </button>
-              </div>
-
-              {selected.description && (
-                <p className="mt-2 text-xs text-slate-600">{selected.description}</p>
-              )}
-              {selected.scale_note && (
-                <p className="mt-1 text-xs italic text-slate-500">
-                  Thang điểm: {selected.scale_note}
-                </p>
-              )}
-
-              <table className="mt-3 w-full text-left text-xs">
-                <thead>
-                  <tr className="border-b border-slate-200 text-slate-500">
-                    <th className="py-1.5">Tiêu chí</th>
-                    <th className="py-1.5">Mô tả</th>
-                    {selected.scoring_mode === "weighted_avg" && (
-                      <th className="w-14 py-1.5 text-right">Trọng số</th>
-                    )}
-                    <th className="w-14 py-1.5 text-right">Điểm</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {selected.criteria.map((c, i) => {
-                    const selTotalW = getTotalWeight(selected.criteria);
-                    const pct = Math.round((getCriterionWeight(c) / selTotalW) * 100);
-                    return (
-                      <tr key={i}>
-                        <td className="py-2 pr-2 align-top font-semibold text-slate-800">
-                          {c.name}
-                        </td>
-                        <td className="py-2 pr-2 align-top text-slate-600">
-                          <div>{c.description}</div>
-                          {c.levels && c.levels.length > 0 && (
-                            <ul className="mt-1 space-y-0.5 text-[11px] text-slate-500">
-                              {c.levels.map((lv, li) => (
-                                <li key={li}>
-                                  <span className="font-semibold text-slate-700">
-                                    • {lv.label}
-                                    {lv.score_range ? ` (${lv.score_range})` : ""}:
-                                  </span>{" "}
-                                  {lv.description}
-                                </li>
-                              ))}
-                            </ul>
-                          )}
-                        </td>
-                        {selected.scoring_mode === "weighted_avg" && (
-                          <td className="py-2 pr-2 text-right align-top font-mono text-[11px] text-slate-500">
-                            {pct}%
-                          </td>
-                        )}
-                        <td className="py-2 text-right align-top font-medium text-indigo-700">
-                          {formatScoreNum(c.min_score)}–{formatScoreNum(c.max_score)}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
         </div>
 
-        {/* Right: Create / Edit Form */}
+        {/* Right: Detail View OR Create/Edit Form */}
         <div className="md:col-span-7 xl:col-span-8">
-          <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-xs">
-            <div className="flex flex-wrap items-start justify-between gap-2 border-b border-slate-100 pb-3">
-              <div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <h2 className="text-base font-bold text-slate-900">
-                    {editingOriginalId
-                      ? `Đang chỉnh sửa: ${name || editingOriginalId}`
-                      : "Tạo Rubric mới"}
-                  </h2>
-                  <span
-                    className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
-                      editingOriginalId
-                        ? "bg-indigo-100 text-indigo-700"
-                        : "bg-emerald-50 text-emerald-700"
-                    }`}
-                  >
-                    {editingOriginalId ? "Chế độ chỉnh sửa" : "Tạo mới"}
-                  </span>
+          {rightMode === "detail" && selected ? (
+            <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-xs">
+              <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-100 pb-4">
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h2 className="text-lg font-bold text-slate-900">
+                      {selected.name}
+                    </h2>
+                    <span
+                      className={`rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${
+                        selected.is_builtin
+                          ? "bg-slate-100 text-slate-600"
+                          : "bg-indigo-100 text-indigo-700"
+                      }`}
+                    >
+                      {selected.is_builtin ? "Mặc định" : "Tùy chỉnh"}
+                    </span>
+                  </div>
+                  <div className="mt-1 text-xs font-semibold text-indigo-700">
+                    {selected.criteria.length} tiêu chí ·{" "}
+                    {formatRubricScoringSummary(selected)}
+                  </div>
+                  {selected.description && (
+                    <p className="mt-1.5 text-xs text-slate-600">
+                      {selected.description}
+                    </p>
+                  )}
+                  {selected.scale_note && (
+                    <p className="mt-1 text-xs italic text-slate-500">
+                      Thang điểm: {selected.scale_note}
+                    </p>
+                  )}
                 </div>
-                <p className="mt-0.5 text-xs text-slate-500">
-                  Thiết kế tiêu chí, trọng số, mô tả các mức đạt và cách quy điểm tổng phù hợp cho lớp học.
-                </p>
+
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setPreviewOpen(true)}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-semibold text-indigo-700 hover:bg-indigo-100"
+                  >
+                    <Eye className="h-3.5 w-3.5" />
+                    Xem Prompt AI
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void handleClone(selected)}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                  >
+                    <Copy className="h-3.5 w-3.5" />
+                    Nhân bản
+                  </button>
+                  {!selected.is_builtin && (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => loadForEdit(selected)}
+                        className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-indigo-700"
+                      >
+                        <Edit className="h-3.5 w-3.5" />
+                        Chỉnh sửa
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void handleDelete(selected)}
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-rose-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-rose-600 hover:bg-rose-50"
+                        title="Xóa rubric"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </>
+                  )}
+                </div>
               </div>
 
-              <button
-                type="button"
-                onClick={() => setPreviewOpen((v) => !v)}
-                className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors ${
-                  previewOpen
-                    ? "border-indigo-300 bg-indigo-50 text-indigo-700"
-                    : "border-slate-200 text-slate-700 hover:bg-slate-50"
-                }`}
-              >
-                {previewOpen ? (
-                  <EyeOff className="h-3.5 w-3.5" />
-                ) : (
-                  <Eye className="h-3.5 w-3.5" />
-                )}
-                {previewOpen ? "Ẩn xem trước Prompt" : "Xem trước Prompt gửi AI"}
-              </button>
+              {/* Criteria Breakdown Cards */}
+              <div className="mt-4 space-y-2.5">
+                {selected.criteria.map((c, i) => {
+                  const selTotalW = getTotalWeight(selected.criteria);
+                  const pct = Math.round(
+                    (getCriterionWeight(c) / selTotalW) * 100
+                  );
+                  return (
+                    <div
+                      key={i}
+                      className="rounded-xl border border-slate-100 bg-slate-50/70 p-3.5"
+                    >
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                          <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-indigo-100 text-[11px] font-bold text-indigo-700">
+                            {i + 1}
+                          </span>
+                          <span className="text-sm font-bold text-slate-900">
+                            {c.name}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2 text-xs">
+                          {selected.scoring_mode === "weighted_avg" && (
+                            <span className="rounded-full bg-white px-2 py-0.5 font-mono font-semibold text-slate-600 ring-1 ring-slate-200">
+                              Trọng số {pct}%
+                            </span>
+                          )}
+                          <span className="rounded-full bg-indigo-50 px-2.5 py-0.5 font-semibold text-indigo-700">
+                            {formatScoreNum(c.min_score)}–{formatScoreNum(c.max_score)}đ
+                          </span>
+                        </div>
+                      </div>
+
+                      {c.description && (
+                        <p className="mt-1.5 text-xs leading-relaxed text-slate-600">
+                          {c.description}
+                        </p>
+                      )}
+
+                      {c.levels && c.levels.length > 0 && (
+                        <div className="mt-2.5 grid gap-1.5 sm:grid-cols-2 lg:grid-cols-3">
+                          {c.levels.map((lv, li) => (
+                            <div
+                              key={li}
+                              className="rounded-lg border border-slate-200/80 bg-white p-2 text-[11px]"
+                            >
+                              <div className="font-bold text-slate-800">
+                                {lv.label}
+                                {lv.score_range ? (
+                                  <span className="ml-1 font-mono text-indigo-600">
+                                    ({lv.score_range})
+                                  </span>
+                                ) : null}
+                              </div>
+                              {lv.description && (
+                                <p className="mt-0.5 text-slate-500">
+                                  {lv.description}
+                                </p>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
             </div>
+          ) : (
+            <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-xs">
+              <div className="flex flex-wrap items-start justify-between gap-2 border-b border-slate-100 pb-3">
+                <div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h2 className="text-base font-bold text-slate-900">
+                      {editingOriginalId
+                        ? `Đang chỉnh sửa: ${name || editingOriginalId}`
+                        : "Tạo Rubric mới"}
+                    </h2>
+                    <span
+                      className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                        editingOriginalId
+                          ? "bg-indigo-100 text-indigo-700"
+                          : "bg-emerald-50 text-emerald-700"
+                      }`}
+                    >
+                      {editingOriginalId ? "Chế độ chỉnh sửa" : "Tạo mới"}
+                    </span>
+                  </div>
+                  <p className="mt-0.5 text-xs text-slate-500">
+                    Thiết kế tiêu chí, trọng số, mô tả các mức đạt và cách quy điểm tổng phù hợp cho lớp học.
+                  </p>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setPreviewOpen((v) => !v)}
+                    className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors ${
+                      previewOpen
+                        ? "border-indigo-300 bg-indigo-50 text-indigo-700"
+                        : "border-slate-200 text-slate-700 hover:bg-slate-50"
+                    }`}
+                  >
+                    {previewOpen ? (
+                      <EyeOff className="h-3.5 w-3.5" />
+                    ) : (
+                      <Eye className="h-3.5 w-3.5" />
+                    )}
+                    {previewOpen ? "Ẩn xem trước Prompt" : "Xem trước Prompt gửi AI"}
+                  </button>
+                  {selected && (
+                    <button
+                      type="button"
+                      onClick={() => setRightMode("detail")}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-300 bg-indigo-50 px-3 py-1.5 text-xs font-semibold text-indigo-700 shadow-2xs transition hover:bg-indigo-100"
+                    >
+                      <ArrowLeft className="h-3.5 w-3.5" />
+                      Quay lại
+                    </button>
+                  )}
+                </div>
+              </div>
 
             {/* Name + Optional Slug ID */}
             <div className="mt-4 grid gap-3 sm:grid-cols-12">
@@ -1018,29 +1121,44 @@ export function RubricsPage({
               </div>
             )}
 
-            <div className="mt-4 flex flex-wrap items-center justify-end gap-2">
-              <button
-                type="button"
-                onClick={resetForm}
-                className="rounded-lg border border-slate-200 px-4 py-2 text-xs font-medium text-slate-600 hover:bg-slate-50"
-              >
-                Tạo mới từ đầu
-              </button>
-              <button
-                type="button"
-                disabled={saving}
-                onClick={handleSave}
-                className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-4 py-2 text-xs font-bold text-white hover:bg-indigo-700 disabled:opacity-50"
-              >
-                <Save className="h-4 w-4" />
-                {saving
-                  ? "Đang lưu..."
-                  : editingOriginalId
-                  ? "Cập nhật Rubric"
-                  : "Lưu Rubric mới"}
-              </button>
+            <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-3">
+              <div>
+                {selected && (
+                  <button
+                    type="button"
+                    onClick={() => setRightMode("detail")}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-300 bg-indigo-50 px-3.5 py-2 text-xs font-semibold text-indigo-700 shadow-2xs transition hover:bg-indigo-100"
+                  >
+                    <ArrowLeft className="h-3.5 w-3.5" />
+                    Hủy &amp; Quay lại
+                  </button>
+                )}
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={resetForm}
+                  className="rounded-lg border border-slate-200 px-4 py-2 text-xs font-medium text-slate-600 hover:bg-slate-50"
+                >
+                  Tạo mới từ đầu
+                </button>
+                <button
+                  type="button"
+                  disabled={saving}
+                  onClick={handleSave}
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-4 py-2 text-xs font-bold text-white hover:bg-indigo-700 disabled:opacity-50"
+                >
+                  <Save className="h-4 w-4" />
+                  {saving
+                    ? "Đang lưu..."
+                    : editingOriginalId
+                    ? "Cập nhật Rubric"
+                    : "Lưu Rubric mới"}
+                </button>
+              </div>
             </div>
           </div>
+          )}
         </div>
       </div>
 
