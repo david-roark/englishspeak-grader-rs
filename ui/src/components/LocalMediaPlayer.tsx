@@ -49,6 +49,7 @@ export const LocalMediaPlayer = forwardRef<
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
   const [retriedAuth, setRetriedAuth] = useState(false);
+  const [isPortrait, setIsPortrait] = useState(false);
   const [authorizedSrc, setAuthorizedSrc] = useState<{
     path: string;
     src: string;
@@ -65,6 +66,7 @@ export const LocalMediaPlayer = forwardRef<
     setErrorMsg(null);
     setReloadKey(0);
     setRetriedAuth(false);
+    setIsPortrait(false);
   }, [path]);
 
   useEffect(() => {
@@ -164,22 +166,38 @@ export const LocalMediaPlayer = forwardRef<
           className={className ?? "w-full"}
         />
       ) : (
-        <video
-          key={`${path}-${reloadKey}`}
-          ref={bindMediaRef}
-          src={src}
-          controls
-          playsInline
-          preload="auto"
-          onLoadedMetadata={() => setErrorMsg(null)}
-          onTimeUpdate={(e) => onTimeUpdate?.(e.currentTarget.currentTime)}
-          onSeeked={(e) => onTimeUpdate?.(e.currentTarget.currentTime)}
-          onError={(e) => handlePlaybackError(e.currentTarget.error)}
+        <div
           className={
-            className ??
-            "aspect-video max-h-[280px] w-full rounded-lg bg-black object-contain"
+            isPortrait
+              ? "flex justify-center overflow-hidden rounded-lg bg-slate-950"
+              : "overflow-hidden rounded-lg bg-black"
           }
-        />
+        >
+          <video
+            key={`${path}-${reloadKey}`}
+            ref={bindMediaRef}
+            src={src}
+            controls
+            playsInline
+            preload="auto"
+            onLoadedMetadata={(e) => {
+              setErrorMsg(null);
+              const v = e.currentTarget;
+              if (v.videoWidth > 0 && v.videoHeight > 0) {
+                setIsPortrait(v.videoHeight > v.videoWidth);
+              }
+            }}
+            onTimeUpdate={(e) => onTimeUpdate?.(e.currentTarget.currentTime)}
+            onSeeked={(e) => onTimeUpdate?.(e.currentTarget.currentTime)}
+            onError={(e) => handlePlaybackError(e.currentTarget.error)}
+            className={
+              className ??
+              (isPortrait
+                ? "max-h-[min(56vh,460px)] w-auto max-w-full object-contain"
+                : "aspect-video max-h-[300px] w-full object-contain")
+            }
+          />
+        </div>
       )}
 
       {errorMsg && (

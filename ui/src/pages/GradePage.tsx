@@ -653,7 +653,6 @@ export function GradePage({
                   ref={videoRef}
                   path={videoInfo.path}
                   kind="video"
-                  className="aspect-video max-h-[260px] w-full rounded-lg bg-black object-contain"
                 />
                 <div className="flex items-center justify-between gap-2 rounded-lg bg-slate-50 px-3 py-1.5 text-xs text-slate-700">
                   <span className="truncate font-medium" title={videoInfo.path}>

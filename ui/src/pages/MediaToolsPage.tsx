@@ -823,11 +823,7 @@ export function MediaToolsPage({
                 path={sourceFile.path}
                 kind={isSourceAudio ? "audio" : "video"}
                 onTimeUpdate={(secs) => setPlayerCurrentTime(secs)}
-                className={
-                  isSourceAudio
-                    ? "w-full"
-                    : "aspect-video max-h-[240px] w-full rounded-lg bg-black object-contain"
-                }
+                className={isSourceAudio ? "w-full" : undefined}
               />
             )}
 
