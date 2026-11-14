@@ -258,6 +258,7 @@ export function MediaToolsPage({
   const [copiedMd, setCopiedMd] = useState(false);
   const [exportBusy, setExportBusy] = useState(false);
   const [exportNotice, setExportNotice] = useState("");
+  const [scriptDirty, setScriptDirty] = useState(false);
   const [playerCurrentTime, setPlayerCurrentTime] = useState(0);
   const [editingSegIdx, setEditingSegIdx] = useState<number | null>(null);
   const [burnMode, setBurnMode] = useState<"hardsub" | "softsub">("hardsub");
@@ -289,6 +290,7 @@ export function MediaToolsPage({
     setPlayerCurrentTime(0);
     setScriptSearch("");
     setExportNotice("");
+    setScriptDirty(false);
     try {
       const info = await api.inspectFile(path);
       setSourceFile(info);
@@ -409,11 +411,35 @@ export function MediaToolsPage({
   function seekPlayerTo(rawTimestamp: string) {
     const cleaned = rawTimestamp.trim().replace(/^\[|\]$/g, "");
     const secs = parseTimecodeToSeconds(cleaned);
-    if (secs === null || !playerRef.current) return;
-    playerRef.current.currentTime = secs;
-    void playerRef.current.play().catch(() => {
-      // Ignore autoplay blocks if browser/webview restricts programmatic play
-    });
+    const el = playerRef.current;
+    if (secs === null || !el) return;
+
+    setPlayerCurrentTime(secs);
+
+    const applySeekAndPlay = () => {
+      try {
+        el.currentTime = secs;
+      } catch {
+        return;
+      }
+      const playAfterSeek = () => {
+        void el.play().catch(() => {
+          // Ignore autoplay blocks if browser/webview restricts programmatic play
+        });
+      };
+      if (el.seeking) {
+        el.addEventListener("seeked", playAfterSeek, { once: true });
+      } else {
+        playAfterSeek();
+      }
+    };
+
+    if (el.readyState < 1) {
+      el.addEventListener("loadedmetadata", applySeekAndPlay, { once: true });
+      el.load();
+    } else {
+      applySeekAndPlay();
+    }
   }
 
   function handleSpeakerChange(
@@ -422,6 +448,7 @@ export function MediaToolsPage({
     nextRole: string
   ) {
     setExportNotice("");
+    setScriptDirty(true);
     setScriptResult((prev) => {
       if (!prev) return prev;
       return {
@@ -448,6 +475,7 @@ export function MediaToolsPage({
     patch: Partial<TranscriptSegment>
   ) {
     setExportNotice("");
+    setScriptDirty(true);
     setScriptResult((prev) => {
       if (!prev) return prev;
       return {
@@ -519,10 +547,12 @@ export function MediaToolsPage({
     });
     setEditingSegIdx(insertPos);
     setExportNotice("");
+    setScriptDirty(true);
   }
 
   function deleteSegmentAt(idx: number) {
     setExportNotice("");
+    setScriptDirty(true);
     setEditingSegIdx((cur) => {
       if (cur === null) return null;
       if (cur === idx) return null;
@@ -634,6 +664,7 @@ export function MediaToolsPage({
         outPath: existingPath,
       });
       setScriptResult((prev) => (prev ? { ...prev, script_output: out } : prev));
+      setScriptDirty(false);
       setExportNotice(`Đã cập nhật file: ${out.file_name}`);
     } catch (e) {
       setErrMsg(String(e));
@@ -735,6 +766,7 @@ export function MediaToolsPage({
           out_path_override: overrides.outPathOverride,
         });
         setScriptResult(res);
+        setScriptDirty(false);
         setSessionHistory((prev) => {
           const nextItems: SessionHistoryItem[] = [
             { id: `${id}_script`, toolLabel: "Tạo Script", output: res.script_output },
@@ -899,82 +931,89 @@ export function MediaToolsPage({
             )}
 
             {scriptResult && (
-              <div
-                className="rounded-lg border border-slate-800 bg-slate-900 px-3 py-2.5 text-white shadow-inner"
-                style={{
-                  fontFamily: `"${subtitleFont}", "Noto Emoji", sans-serif`,
-                }}
-              >
-                <div className="flex items-center justify-between gap-2 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
-                  <span>Xem trước phụ đề · {subtitleFont}</span>
-                  <span className="font-mono text-indigo-300">
+              <div className="space-y-2 rounded-xl border border-indigo-200 bg-indigo-50/40 p-3">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-1.5 text-[11px] font-bold text-indigo-950">
+                    <span>Xem trước phụ đề</span>
+                    <span className="rounded-full border border-indigo-200 bg-white px-2 py-0.5 text-[10px] font-semibold text-indigo-700">
+                      {subtitleFont}
+                    </span>
+                  </div>
+                  <span className="rounded-md bg-indigo-100/80 px-2 py-0.5 font-mono text-[11px] font-semibold text-indigo-700">
                     {formatDuration(playerCurrentTime)}
                   </span>
                 </div>
-                {activePreviewSegment ? (
-                  (() => {
-                    const prefix = formatPreviewSpeakerPrefix(
-                      activePreviewSegment,
-                      showSubSpeaker,
-                      showSubRole
-                    );
-                    const hasText =
-                      showSubText &&
-                      activePreviewSegment.text.trim().length > 0;
-                    const hasTrans =
-                      showSubTranslation &&
-                      activePreviewSegment.translation.trim().length > 0;
-                    const hasGram =
-                      showSubGrammar &&
-                      activePreviewSegment.grammar_note.trim().length > 0;
-                    if (!hasText && !hasTrans && !hasGram) {
-                      return (
-                        <p className="mt-1.5 text-center text-[11px] italic text-slate-400">
-                          Các thành phần phụ đề của đoạn này đang được tắt hiển thị.
-                        </p>
+                <div
+                  className="rounded-lg border border-indigo-200/80 bg-white px-3 py-2.5 text-slate-900 shadow-xs"
+                  style={{
+                    fontFamily: `"${subtitleFont}", "Noto Emoji", sans-serif`,
+                  }}
+                >
+                  {activePreviewSegment ? (
+                    (() => {
+                      const prefix = formatPreviewSpeakerPrefix(
+                        activePreviewSegment,
+                        showSubSpeaker,
+                        showSubRole
                       );
-                    }
-                    const prefixSpan = prefix ? (
-                      <>
-                        <span
-                          className={`font-bold ${
-                            activePreviewSegment.role === "teacher"
-                              ? "text-amber-300"
-                              : "text-emerald-300"
-                          }`}
-                        >
-                          [{prefix}]:
-                        </span>{" "}
-                      </>
-                    ) : null;
-                    return (
-                      <div className="mt-1.5 space-y-0.5 text-center">
-                        {hasText && (
-                          <p className="text-xs leading-snug">
-                            {prefixSpan}
-                            {activePreviewSegment.text}
+                      const hasText =
+                        showSubText &&
+                        activePreviewSegment.text.trim().length > 0;
+                      const hasTrans =
+                        showSubTranslation &&
+                        activePreviewSegment.translation.trim().length > 0;
+                      const hasGram =
+                        showSubGrammar &&
+                        activePreviewSegment.grammar_note.trim().length > 0;
+                      if (!hasText && !hasTrans && !hasGram) {
+                        return (
+                          <p className="text-center text-[11px] italic text-slate-500">
+                            Các thành phần phụ đề của đoạn này đang được tắt hiển thị.
                           </p>
-                        )}
-                        {hasTrans && (
-                          <p className="text-[11px] italic text-slate-300">
-                            {!hasText && prefixSpan}
-                            {activePreviewSegment.translation}
-                          </p>
-                        )}
-                        {hasGram && (
-                          <p className="text-[11px] text-sky-300">
-                            {!hasText && !hasTrans && prefixSpan}
-                            💡 Sửa: {activePreviewSegment.grammar_note}
-                          </p>
-                        )}
-                      </div>
-                    );
-                  })()
-                ) : (
-                  <p className="mt-1.5 text-center text-[11px] italic text-slate-400">
-                    Bấm phát hoặc chọn mốc thời gian để xem trước phụ đề chạy theo video...
-                  </p>
-                )}
+                        );
+                      }
+                      const prefixSpan = prefix ? (
+                        <>
+                          <span
+                            className={`font-bold ${
+                              activePreviewSegment.role === "teacher"
+                                ? "text-amber-700"
+                                : "text-emerald-700"
+                            }`}
+                          >
+                            [{prefix}]:
+                          </span>{" "}
+                        </>
+                      ) : null;
+                      return (
+                        <div className="space-y-0.5 text-center">
+                          {hasText && (
+                            <p className="text-xs leading-snug text-slate-900">
+                              {prefixSpan}
+                              {activePreviewSegment.text}
+                            </p>
+                          )}
+                          {hasTrans && (
+                            <p className="text-[11px] italic text-slate-600">
+                              {!hasText && prefixSpan}
+                              {activePreviewSegment.translation}
+                            </p>
+                          )}
+                          {hasGram && (
+                            <p className="text-[11px] text-indigo-700">
+                              {!hasText && !hasTrans && prefixSpan}
+                              💡 Sửa: {activePreviewSegment.grammar_note}
+                            </p>
+                          )}
+                        </div>
+                      );
+                    })()
+                  ) : (
+                    <p className="text-center text-[11px] italic text-slate-500">
+                      Bấm phát hoặc chọn mốc thời gian để xem trước phụ đề chạy theo video...
+                    </p>
+                  )}
+                </div>
               </div>
             )}
           </div>
@@ -1440,11 +1479,20 @@ export function MediaToolsPage({
                     type="button"
                     disabled={exportBusy}
                     onClick={() => void handleSaveUpdatedMarkdown()}
-                    className="inline-flex items-center gap-1 rounded-lg border border-indigo-200 bg-indigo-50 px-2.5 py-1.5 text-xs font-semibold text-indigo-700 hover:bg-indigo-100 disabled:opacity-50"
-                    title="Ghi đè lại file đã lưu sau khi đổi tên/vai trò người nói"
+                    className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-semibold transition disabled:opacity-50 ${
+                      scriptDirty
+                        ? "border-amber-500 bg-amber-500 text-white shadow-sm ring-2 ring-amber-200 hover:bg-amber-600"
+                        : "border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100"
+                    }`}
+                    title="Ghi đè lại file đã lưu sau khi chỉnh sửa script"
                   >
                     <Download className="h-3.5 w-3.5" />
-                    Lưu cập nhật file
+                    {scriptDirty ? "Lưu thay đổi vào file" : "Lưu cập nhật file"}
+                    {scriptDirty && (
+                      <span className="rounded bg-white/25 px-1.5 py-0.5 text-[10px] font-bold">
+                        Chưa lưu
+                      </span>
+                    )}
                   </button>
                   <button
                     type="button"
@@ -1495,18 +1543,20 @@ export function MediaToolsPage({
                         key={sp.id}
                         className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white p-1.5"
                       >
-                        <select
+                        <SelectField
+                          size="xs"
                           value={sp.role}
-                          onChange={(e) =>
-                            handleSpeakerChange(sp.id, sp.label, e.target.value)
+                          onChange={(val) =>
+                            handleSpeakerChange(sp.id, sp.label, val)
                           }
-                          aria-label={`Vai trò của ${sp.label}`}
-                          className="rounded border border-slate-200 bg-slate-50 px-1.5 py-1 text-[11px] font-semibold text-slate-700 focus:border-indigo-400 focus:outline-none"
-                        >
-                          <option value="teacher">Giáo viên</option>
-                          <option value="student">Học sinh</option>
-                          <option value="other">Khác</option>
-                        </select>
+                          ariaLabel={`Vai trò của ${sp.label}`}
+                          className="w-28 shrink-0"
+                          options={[
+                            { value: "teacher", label: "Giáo viên" },
+                            { value: "student", label: "Học sinh" },
+                            { value: "other", label: "Khác" },
+                          ]}
+                        />
                         <input
                           type="text"
                           value={sp.label}
@@ -1548,56 +1598,71 @@ export function MediaToolsPage({
                         <label className="block text-[11px] font-semibold text-slate-700">
                           Kiểu ghép phụ đề
                         </label>
-                        <select
+                        <SelectField
+                          size="xs"
                           value={burnMode}
-                          onChange={(e) =>
+                          onChange={(val) =>
                             setBurnMode(
-                              e.target.value === "softsub" ? "softsub" : "hardsub"
+                              val === "softsub" ? "softsub" : "hardsub"
                             )
                           }
-                          aria-label="Kiểu ghép phụ đề vào video"
-                          className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-800 focus:border-indigo-400 focus:outline-none"
-                        >
-                          <option value="hardsub">
-                            In cứng (Hardsub — Mọi thiết bị/Zalo &amp; có màu vai trò)
-                          </option>
-                          <option value="softsub">
-                            Phụ đề mềm (Softsub mov_text — Xuất cực nhanh)
-                          </option>
-                        </select>
+                          ariaLabel="Kiểu ghép phụ đề vào video"
+                          className="mt-1"
+                          options={[
+                            {
+                              value: "hardsub",
+                              label: "In cứng (Hardsub)",
+                              badge: "Khuyên dùng",
+                              description:
+                                "Mọi thiết bị/Zalo đều hiện & giữ màu vai trò",
+                            },
+                            {
+                              value: "softsub",
+                              label: "Phụ đề mềm (Softsub mov_text)",
+                              description:
+                                "Xuất cực nhanh, người xem tự bật/tắt phụ đề",
+                            },
+                          ]}
+                        />
                       </div>
                       <div>
                         <label className="block text-[11px] font-semibold text-slate-700">
                           Font chữ Google (Tiếng Việt &amp; Icon)
                         </label>
-                        <select
+                        <SelectField
+                          size="xs"
                           value={subtitleFont}
-                          onChange={(e) =>
+                          onChange={(val) =>
                             setSubtitleFont(
-                              e.target.value as
-                                | "Be Vietnam Pro"
-                                | "Noto Sans"
-                                | "Lexend"
+                              val as "Be Vietnam Pro" | "Noto Sans" | "Lexend"
                             )
                           }
                           disabled={burnMode === "softsub"}
-                          aria-label="Chọn font chữ Google cho phụ đề"
-                          className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-800 focus:border-indigo-400 focus:outline-none disabled:bg-slate-100 disabled:text-slate-400"
-                        >
-                          <option value="Be Vietnam Pro">
-                            Be Vietnam Pro (Khuyên dùng — Dấu Việt cực nét)
-                          </option>
-                          <option value="Noto Sans">
-                            Noto Sans (Chuẩn IPA &amp; Đa ngôn ngữ)
-                          </option>
-                          <option value="Lexend">
-                            Lexend (Khoáng đạt, dễ đọc luyện nghe)
-                          </option>
-                        </select>
+                          ariaLabel="Chọn font chữ Google cho phụ đề"
+                          className="mt-1"
+                          options={[
+                            {
+                              value: "Be Vietnam Pro",
+                              label: "Be Vietnam Pro",
+                              badge: "Khuyên dùng",
+                              description: "Dấu tiếng Việt cực nét, hiện đại",
+                            },
+                            {
+                              value: "Noto Sans",
+                              label: "Noto Sans",
+                              description: "Chuẩn phiên âm IPA & đa ngôn ngữ",
+                            },
+                            {
+                              value: "Lexend",
+                              label: "Lexend",
+                              description: "Khoáng đạt, dễ đọc khi luyện nghe",
+                            },
+                          ]}
+                        />
                       </div>
                     </div>
 
-                    <div className="rounded-lg border border-indigo-200/80 bg-white/80 p-2.5">
+                    <div className="rounded-lg border border-slate-200 bg-white p-2.5 shadow-2xs">
                       <div className="flex flex-wrap items-center justify-between gap-2">
                         <span className="text-[11px] font-semibold text-slate-700">
                           Thành phần hiển thị trên phụ đề (đồng bộ Xem trước &amp; Video):
@@ -1612,7 +1677,7 @@ export function MediaToolsPage({
                               setShowSubTranslation(true);
                               setShowSubGrammar(true);
                             }}
-                            className="rounded border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-semibold text-slate-700 hover:border-indigo-300 hover:bg-indigo-50"
+                            className="rounded-md border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-[10px] font-semibold text-indigo-700 hover:bg-indigo-100"
                           >
                             Hiện đầy đủ
                           </button>
@@ -1625,7 +1690,7 @@ export function MediaToolsPage({
                               setShowSubTranslation(false);
                               setShowSubGrammar(false);
                             }}
-                            className="rounded border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-semibold text-slate-700 hover:border-indigo-300 hover:bg-indigo-50"
+                            className="rounded-md border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-semibold text-slate-700 hover:bg-slate-100"
                           >
                             Chỉ lời thoại sạch
                           </button>
@@ -1666,23 +1731,49 @@ export function MediaToolsPage({
                         ].map((item) => (
                           <label
                             key={item.id}
-                            className={`inline-flex cursor-pointer select-none items-center gap-1.5 rounded-md border px-2 py-1 text-[11px] font-medium transition ${
+                            className={`inline-flex cursor-pointer select-none items-center gap-1.5 rounded-lg border px-2.5 py-1 text-[11px] font-semibold transition ${
                               item.checked
-                                ? "border-indigo-300 bg-indigo-50 text-indigo-900"
-                                : "border-slate-200 bg-slate-50 text-slate-500 hover:bg-slate-100"
+                                ? "border-indigo-300 bg-indigo-50 text-indigo-800 shadow-2xs"
+                                : "border-slate-200 bg-slate-50/70 text-slate-500 hover:border-slate-300 hover:bg-slate-100"
                             }`}
                           >
                             <input
                               type="checkbox"
                               checked={item.checked}
                               onChange={(e) => item.onChange(e.target.checked)}
-                              className="h-3.5 w-3.5 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                              className="sr-only"
                             />
+                            <span
+                              className={`inline-flex h-3.5 w-3.5 items-center justify-center rounded border transition ${
+                                item.checked
+                                  ? "border-indigo-600 bg-indigo-600 text-white"
+                                  : "border-slate-300 bg-white text-transparent"
+                              }`}
+                            >
+                              <Check className="h-2.5 w-2.5 stroke-[3]" />
+                            </span>
                             {item.label}
                           </label>
                         ))}
                       </div>
                     </div>
+
+                    {scriptDirty && (
+                      <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                        <span>
+                          Script vừa có chỉnh sửa chưa lưu ra file. Hãy lưu lại để đồng bộ với video xuất ra.
+                        </span>
+                        <button
+                          type="button"
+                          disabled={exportBusy}
+                          onClick={() => void handleSaveUpdatedMarkdown()}
+                          className="inline-flex items-center gap-1 rounded-md bg-amber-500 px-2.5 py-1 text-[11px] font-bold text-white hover:bg-amber-600 disabled:opacity-50"
+                        >
+                          <Download className="h-3 w-3" />
+                          Lưu file ngay
+                        </button>
+                      </div>
+                    )}
 
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <span
@@ -1851,7 +1942,8 @@ export function MediaToolsPage({
                                 <label className="block text-[10px] font-semibold text-slate-600">
                                   Chọn người nói
                                 </label>
-                                <select
+                                <SelectField
+                                  size="xs"
                                   value={
                                     scriptResult.transcript.speakers.some(
                                       (s) => s.id === seg.speaker_id
@@ -1859,25 +1951,22 @@ export function MediaToolsPage({
                                       ? seg.speaker_id
                                       : ""
                                   }
-                                  onChange={(e) => {
-                                    if (e.target.value) {
-                                      assignSegmentSpeaker(
-                                        originalIdx,
-                                        e.target.value
-                                      );
+                                  onChange={(val) => {
+                                    if (val) {
+                                      assignSegmentSpeaker(originalIdx, val);
                                     }
                                   }}
-                                  className="mt-0.5 w-full rounded-md border border-slate-200 bg-white px-2 py-1 text-xs focus:border-indigo-400 focus:outline-none"
-                                >
-                                  <option value="" disabled>
-                                    -- Chọn người nói --
-                                  </option>
-                                  {scriptResult.transcript.speakers.map((sp) => (
-                                    <option key={sp.id} value={sp.id}>
-                                      {sp.label} ({roleBadgeStyle(sp.role).label})
-                                    </option>
-                                  ))}
-                                </select>
+                                  placeholder="-- Chọn người nói --"
+                                  ariaLabel="Chọn người nói cho đoạn thoại"
+                                  className="mt-0.5"
+                                  options={scriptResult.transcript.speakers.map(
+                                    (sp) => ({
+                                      value: sp.id,
+                                      label: sp.label,
+                                      badge: roleBadgeStyle(sp.role).label,
+                                    })
+                                  )}
+                                />
                               </div>
 
                               <div className="sm:col-span-4">

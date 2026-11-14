@@ -1,4 +1,10 @@
-import { forwardRef, useEffect, useState, type ForwardedRef } from "react";
+import {
+  forwardRef,
+  useCallback,
+  useEffect,
+  useState,
+  type ForwardedRef,
+} from "react";
 import { AlertTriangle, ExternalLink, RefreshCw } from "lucide-react";
 import { api } from "../lib/api";
 
@@ -48,6 +54,13 @@ export const LocalMediaPlayer = forwardRef<
     src: string;
   } | null>(null);
 
+  const bindMediaRef = useCallback(
+    (node: HTMLMediaElement | null) => {
+      assignMediaRef(ref, node);
+    },
+    [ref]
+  );
+
   useEffect(() => {
     setErrorMsg(null);
     setReloadKey(0);
@@ -62,10 +75,22 @@ export const LocalMediaPlayer = forwardRef<
     if (typeof maybeAuthorize !== "function") {
       return;
     }
+    const currentUrl = api.mediaUrl(path);
     void maybeAuthorize(path)
       .then((freshUrl) => {
         if (!cancelled && freshUrl) {
-          setAuthorizedSrc({ path, src: freshUrl });
+          let isSameDecoded = freshUrl === currentUrl;
+          if (!isSameDecoded) {
+            try {
+              isSameDecoded =
+                decodeURIComponent(freshUrl) === decodeURIComponent(currentUrl);
+            } catch {
+              isSameDecoded = false;
+            }
+          }
+          if (!isSameDecoded) {
+            setAuthorizedSrc({ path, src: freshUrl });
+          }
         }
       })
       .catch(() => {
@@ -110,10 +135,10 @@ export const LocalMediaPlayer = forwardRef<
       {kind === "audio" ? (
         <audio
           key={`${path}-${reloadKey}`}
-          ref={(el) => assignMediaRef(ref, el)}
+          ref={bindMediaRef}
           src={src}
           controls
-          preload="metadata"
+          preload="auto"
           onLoadedMetadata={() => setErrorMsg(null)}
           onTimeUpdate={(e) => onTimeUpdate?.(e.currentTarget.currentTime)}
           onSeeked={(e) => onTimeUpdate?.(e.currentTarget.currentTime)}
@@ -123,11 +148,11 @@ export const LocalMediaPlayer = forwardRef<
       ) : (
         <video
           key={`${path}-${reloadKey}`}
-          ref={(el) => assignMediaRef(ref, el)}
+          ref={bindMediaRef}
           src={src}
           controls
           playsInline
-          preload="metadata"
+          preload="auto"
           onLoadedMetadata={() => setErrorMsg(null)}
           onTimeUpdate={(e) => onTimeUpdate?.(e.currentTarget.currentTime)}
           onSeeked={(e) => onTimeUpdate?.(e.currentTarget.currentTime)}
