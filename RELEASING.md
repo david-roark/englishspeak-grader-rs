@@ -1,7 +1,9 @@
 # 🏷️ Hướng dẫn Đóng gói & Phát hành (Maintainer)
 
 Tài liệu này mô tả quy trình đóng gói thủ công và phát hành tự động đa nền tảng (**Windows / macOS /
-Linux**) cho **EnglishSpeak Grader**.
+Linux**) dành riêng cho **chủ sở hữu bản quyền / Maintainer được ủy quyền** của **EnglishSpeak Grader**.
+
+> **Lưu ý bản quyền:** Theo [LICENSE](LICENSE), chỉ chủ sở hữu bản quyền (hoặc người được ủy quyền bằng văn bản) mới có quyền phân phối hoặc phát hành bộ cài chính thức. Bên thứ ba không được phép đóng gói lại, bán hoặc phân phối lại sản phẩm khi chưa được phép.
 
 ---
 

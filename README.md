@@ -18,9 +18,11 @@
 - **Cấu hình Prompt đa hồ sơ & hiệu chỉnh AI:** Quản lý nhiều **Prompt Profile** (chuyển nhanh theo lớp/bài thi), chỉnh **Temperature**, **Độ khắt khe (Strictness)**, quy tắc chấm và **xem trước toàn bộ `System Instruction` + `User Prompt`** sẽ gửi cho Gemini.
 - **Nhận diện & gán lại tên học sinh:** Tự lấy tên từ phần giới thiệu trong video; nếu không rõ, đặt nhãn tạm (`Học sinh 1/2...`) để giáo viên sửa trực tiếp trên giao diện.
 - **Xem trước media & tua theo dẫn chứng:** Phát video/audio cục bộ qua HTTP Byte-Range server nội bộ bảo mật theo phiên (có fallback mở trình phát hệ thống nếu gặp codec đặc thù); bấm vào timestamp trong kết quả để tua video đến đúng đoạn học sinh nói.
-- **Xưởng Media tích hợp (`FFmpeg`):** Nén video (4 mức), tách MP3 tối ưu giọng nói (3 mức), cắt đoạn media (`trim`), tắt tiếng video (`mute`), hiển thị tiến trình thực và chọn nơi lưu linh hoạt.
+- **Xưởng Media tích hợp (`FFmpeg` + AI Phụ đề):**
+  - Nén video (4 mức), tách MP3 tối ưu giọng nói (3 mức), cắt đoạn media (`trim`), tắt tiếng video (`mute`), hiển thị tiến trình thực và chọn nơi lưu linh hoạt.
+  - **Tạo Script & Ghép phụ đề AI:** Trích xuất hội thoại từ video/audio bằng Gemini (nhận diện vai trò GV/HS, chỉnh sửa tên người nói và từng câu thoại, xuất/lưu file `.md`), xem trước phụ đề chạy đồng bộ theo video, tùy chỉnh ẩn/hiện từng thành phần phụ đề, chọn Google Font đa ngôn ngữ (hỗ trợ tiếng Việt & emoji) và xuất video **Hardsub** (in cứng) hoặc **Softsub** (phụ đề mềm).
 - **Lịch sử & Xuất báo cáo:** Chuyển đổi giữa chế độ xem **Danh sách** và **Bảng tổng hợp**, tìm kiếm nhanh, xuất **Excel (`.xlsx`)** có định dạng sẵn và sao chép báo cáo **Markdown**.
-- **Tùy biến giao diện:** Hỗ trợ chuyển bảng màu giao diện và điều chỉnh **kích thước chữ** cho dễ đọc khi giảng dạy/chấm bài lâu.
+- **Tùy biến giao diện:** Hỗ trợ chuyển đổi chế độ **Light / Dark theme**, chọn bảng màu nhấn (accent color) và điều chỉnh **kích thước chữ** cho dễ đọc khi giảng dạy/chấm bài lâu.
 
 ---
 
@@ -75,4 +77,4 @@ Tải bộ cài tương ứng với hệ điều hành tại trang [**Releases**
   ```
 - Thiết lập môi trường dev, kiến trúc workspace và quy trình PR: xem [CONTRIBUTING.md](CONTRIBUTING.md).
 - Quy trình nâng phiên bản và phát hành bộ cài đa nền tảng qua GitHub Actions: xem [RELEASING.md](RELEASING.md).
-- Giấy phép sử dụng: [LICENSE](LICENSE).
+- **Giấy phép sử dụng:** Phần mềm được cấp phép theo [Personal & Non-Commercial Use License (All Rights Reserved)](LICENSE) — **chỉ cho phép sử dụng cá nhân, phi thương mại**. Nghiêm cấm mọi hành vi thương mại hóa, bán lại hoặc phân phối lại sản phẩm (mã nguồn hoặc bản dựng) khi chưa có sự đồng ý bằng văn bản từ chủ sở hữu bản quyền.

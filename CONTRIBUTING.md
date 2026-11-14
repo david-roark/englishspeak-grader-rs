@@ -1,7 +1,8 @@
 # 🤝 Hướng dẫn Phát triển & Đóng góp
 
-Tài liệu này dành cho lập trình viên muốn build từ mã nguồn, kiểm thử hoặc đóng góp vào
-**EnglishSpeak Grader** (phiên bản Rust + Tauri v2).
+Tài liệu này dành cho lập trình viên hoặc người dùng muốn tự build từ mã nguồn, kiểm thử hoặc gửi đóng góp cho **EnglishSpeak Grader** (phiên bản Rust + Tauri v2).
+
+> **Lưu ý về bản quyền & giấy phép:** Dự án được phát hành theo [Personal & Non-Commercial Use License (All Rights Reserved)](LICENSE). Bạn chỉ được phép tải, tự build và chỉnh sửa phục vụ **mục đích cá nhân, phi thương mại**. Không được phép phân phối lại bản fork/bản dựng hoặc sử dụng cho mục đích thương mại nếu chưa có văn bản cho phép từ chủ sở hữu bản quyền.
 
 ---
 
@@ -120,7 +121,7 @@ Hoặc chạy từng bước trước khi tạo Pull Request:
 
 ## 📬 Quy trình gửi Pull Request
 
-1. Fork repository và tạo branch mới (`feature/<ten>` hoặc `bugfix/<ten>`).
+1. Fork repository (chỉ để phát triển đóng góp cá nhân, không phân phối lại thương mại) và tạo branch mới (`feature/<ten>` hoặc `bugfix/<ten>`).
 2. Thực hiện thay đổi kèm test case mới (nếu thêm tính năng hoặc sửa bug).
-3. Đảm bảo `cargo test -p grader-core`, `cargo clippy` và `npm --prefix ui run build` đều pass.
-4. Tạo Pull Request mô tả rõ phạm vi thay đổi và kết quả kiểm tra.
+3. Đảm bảo `./scripts/check.sh` (hoặc `cargo test --workspace`, `cargo clippy`, `npm --prefix ui run check`) đều pass.
+4. Tạo Pull Request mô tả rõ phạm vi thay đổi và kết quả kiểm tra. Khi gửi Pull Request, bạn xác nhận phần mã đóng góp do bạn tự viết hoặc có quyền đóng góp và đồng ý tích hợp vào dự án theo điều khoản của [LICENSE](LICENSE).
