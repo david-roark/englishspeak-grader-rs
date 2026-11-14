@@ -2,7 +2,7 @@
 name = "grader-core"
 version.workspace = true
 edition.workspace = true
-license.workspace = true
+license-file.workspace = true
 description = "Core engine for EnglishSpeak Grader: rubrics, prompts, Gemini API client, normalized SQLite storage, Excel export, and FFmpeg media processing."
 
 [dependencies]

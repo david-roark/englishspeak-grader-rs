@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/david-roark/englishspeak-grader-rs/actions/workflows/ci.yml/badge.svg)](https://github.com/david-roark/englishspeak-grader-rs/actions/workflows/ci.yml)
 [![Build & Release](https://github.com/david-roark/englishspeak-grader-rs/actions/workflows/release.yml/badge.svg)](https://github.com/david-roark/englishspeak-grader-rs/actions/workflows/release.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![License: Personal / Non-Commercial](https://img.shields.io/badge/License-Personal%20%26%20Non--Commercial-amber.svg)](LICENSE)
 
 Ứng dụng desktop đa nền tảng (**Windows / macOS / Linux**) hỗ trợ giáo viên tiếng Anh chấm bài nói qua video bằng **Google Gemini AI** — xây dựng trên nền **Rust + Tauri v2 + React**, lưu trữ cục bộ hoàn toàn bằng **SQLite**.
 
