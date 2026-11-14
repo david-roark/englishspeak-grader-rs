@@ -51,6 +51,8 @@
 @custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
 
 :root {
+  --app-font-family: "Be Vietnam Pro", "Noto Sans", system-ui, -apple-system, sans-serif;
+  --app-font-weight: 400;
   --surface-canvas: #f8fafc;
   --surface-card: #ffffff;
   --surface-card-soft: rgba(255, 255, 255, 0.72);
@@ -321,10 +323,18 @@
   }
 
   body {
-    font-family: "Inter", "Roboto", system-ui, -apple-system, sans-serif;
+    font-family: var(--app-font-family);
+    font-weight: var(--app-font-weight);
     background-color: var(--surface-canvas);
     color: var(--color-slate-900);
     transition: background-color 150ms ease, color 150ms ease;
+  }
+
+  input,
+  select,
+  textarea,
+  button {
+    font-family: inherit;
   }
 
   [data-theme="dark"] input,
@@ -396,21 +406,87 @@
   }
 }
 
-/* Keep solid white surfaces decoupled from text-white in dark mode */
-[data-theme="dark"] .bg-white {
+/* =========================================================
+   Extended Display Surface Presets (Sepia, Mist, Midnight)
+   ========================================================= */
+[data-surface="sepia"] {
+  --surface-canvas: #f4ede0;
+  --surface-card: #fcf8f0;
+  --surface-card-soft: rgba(252, 248, 240, 0.84);
+  --color-slate-50: #efe7d8;
+  --color-slate-100: #e8decb;
+  --color-slate-200: #d8cbb3;
+  --color-slate-400: #8c7e6a;
+  --color-slate-500: #6f6353;
+  --color-slate-600: #54493c;
+  --color-slate-700: #3f362c;
+  --color-slate-800: #2b241d;
+  --color-slate-900: #1e1812;
+}
+
+[data-surface="mist"] {
+  --surface-canvas: #e9eef5;
+  --surface-card: #f6f8fb;
+  --surface-card-soft: rgba(246, 248, 251, 0.84);
+  --color-slate-50: #e3e9f2;
+  --color-slate-100: #dae2ee;
+  --color-slate-200: #c7d2e2;
+}
+
+[data-surface="midnight"] {
+  --surface-canvas: #050811;
+  --surface-card: #0c1322;
+  --surface-card-soft: rgba(12, 19, 34, 0.8);
+  --color-slate-50: #111a2e;
+  --color-slate-100: #18233c;
+  --color-slate-200: #243252;
+}
+
+/* Keep solid white surfaces decoupled from text-white in dark & custom surfaces */
+[data-theme="dark"] .bg-white,
+[data-surface="sepia"] .bg-white,
+[data-surface="mist"] .bg-white,
+[data-surface="midnight"] .bg-white,
+[data-surface="custom"] .bg-white {
   background-color: var(--surface-card);
 }
 
-[data-theme="dark"] .bg-white\/60 {
+[data-theme="dark"] .bg-white\/60,
+[data-surface="sepia"] .bg-white\/60,
+[data-surface="mist"] .bg-white\/60,
+[data-surface="midnight"] .bg-white\/60,
+[data-surface="custom"] .bg-white\/60 {
   background-color: var(--surface-card-soft);
 }
 
-[data-theme="dark"] .hover\:bg-white:hover {
+[data-theme="dark"] .hover\:bg-white:hover,
+[data-surface="sepia"] .hover\:bg-white:hover,
+[data-surface="mist"] .hover\:bg-white:hover,
+[data-surface="midnight"] .hover\:bg-white:hover,
+[data-surface="custom"] .hover\:bg-white:hover {
   background-color: var(--color-slate-100);
 }
 
-[data-theme="dark"] .focus\:bg-white:focus {
+[data-theme="dark"] .focus\:bg-white:focus,
+[data-surface="sepia"] .focus\:bg-white:focus,
+[data-surface="mist"] .focus\:bg-white:focus,
+[data-surface="midnight"] .focus\:bg-white:focus,
+[data-surface="custom"] .focus\:bg-white:focus {
   background-color: var(--surface-card);
+}
+
+/* Global Font Weight Customization */
+[data-font-weight="light"] .font-normal {
+  font-weight: 300;
+}
+
+[data-font-weight="medium"] .font-normal {
+  font-weight: 500;
+}
+
+[data-font-weight="semibold"] .font-normal,
+[data-font-weight="semibold"] .font-medium {
+  font-weight: 600;
 }
 
 /* Keep solid buttons crisp while allowing text accents to brighten */

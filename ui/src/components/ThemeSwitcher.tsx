@@ -7,6 +7,7 @@ import {
   MIN_FONT_SIZE,
   THEME_ACCENTS,
   THEME_MODES,
+  THEME_SURFACES,
   useTheme,
   type ThemeMode,
 } from "../lib/theme";
@@ -18,8 +19,20 @@ const MODE_ICONS: Record<ThemeMode, typeof Sun> = {
 };
 
 export function ThemeSwitcher() {
-  const { mode, accent, fontSize, setMode, setAccent, setFontSize, stepFontSize } =
-    useTheme();
+  const {
+    mode,
+    surface,
+    customCanvasHex,
+    accent,
+    customAccentHex,
+    fontSize,
+    setMode,
+    setSurface,
+    setAccent,
+    setCustomAccentHex,
+    setFontSize,
+    stepFontSize,
+  } = useTheme();
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement | null>(null);
 
@@ -50,7 +63,9 @@ export function ThemeSwitcher() {
   }, [open]);
 
   const currentAccent =
-    THEME_ACCENTS.find((a) => a.id === accent) ?? THEME_ACCENTS[0];
+    accent === "custom"
+      ? { id: "custom" as const, label: `Tùy chỉnh (${customAccentHex})`, swatch: customAccentHex }
+      : THEME_ACCENTS.find((a) => a.id === accent) ?? THEME_ACCENTS[0];
 
   return (
     <div ref={containerRef} className="relative flex items-center gap-1.5">
@@ -143,6 +158,55 @@ export function ThemeSwitcher() {
                 </button>
               );
             })}
+          </div>
+
+          <div className="mt-2.5 flex items-center justify-between gap-2 rounded-lg border border-slate-200 bg-slate-50/70 px-2.5 py-1.5">
+            <span className="text-[11px] font-semibold text-slate-700">
+              Tự chọn màu:
+            </span>
+            <div className="flex items-center gap-1.5">
+              <input
+                type="color"
+                value={customAccentHex}
+                onChange={(e) => setCustomAccentHex(e.target.value)}
+                aria-label="Chọn màu chủ đạo tùy chỉnh"
+                className="h-6 w-8 cursor-pointer rounded border border-slate-200 bg-transparent p-0"
+              />
+              <span className="font-mono text-[10px] text-slate-500">
+                {customAccentHex}
+              </span>
+            </div>
+          </div>
+
+          <div className="mt-2.5 border-t border-slate-100 pt-2.5">
+            <div className="mb-1.5 text-xs font-bold text-slate-900">
+              Màu nền hiển thị
+            </div>
+            <div className="flex flex-wrap gap-1">
+              {THEME_SURFACES.map((s) => {
+                const active = surface === s.id;
+                const swatch = s.id === "custom" ? customCanvasHex : s.canvasSwatch;
+                return (
+                  <button
+                    key={s.id}
+                    type="button"
+                    onClick={() => setSurface(s.id)}
+                    title={s.description}
+                    className={`inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[11px] font-medium transition ${
+                      active
+                        ? "border-indigo-400 bg-indigo-50 font-semibold text-indigo-800"
+                        : "border-slate-200 text-slate-700 hover:bg-slate-50"
+                    }`}
+                  >
+                    <span
+                      className="h-2.5 w-2.5 rounded-full border border-black/15"
+                      style={{ backgroundColor: swatch }}
+                    />
+                    {s.label}
+                  </button>
+                );
+              })}
+            </div>
           </div>
 
           <div className="mt-3 border-t border-slate-100 pt-2.5">

@@ -29,7 +29,10 @@ import {
   MAX_FONT_SIZE,
   MIN_FONT_SIZE,
   THEME_ACCENTS,
+  THEME_FONT_WEIGHTS,
+  THEME_FONTS,
   THEME_MODES,
+  THEME_SURFACES,
   useTheme,
   type ThemeMode,
 } from "../lib/theme";
@@ -76,11 +79,28 @@ export function SettingsPage({
   const [assignmentErr, setAssignmentErr] = useState("");
   const {
     mode,
+    surface,
+    customCanvasHex,
+    customCardHex,
     accent,
+    customAccentHex,
+    customTextEnabled,
+    customTextHex,
+    fontFamily,
+    customFontFamily,
+    fontWeight,
     fontSize,
     resolvedMode,
     setMode,
+    setSurface,
+    setCustomSurfaceColors,
     setAccent,
+    setCustomAccentHex,
+    setCustomTextEnabled,
+    setCustomTextHex,
+    setFontFamily,
+    setCustomFontFamily,
+    setFontWeight,
     setFontSize,
     stepFontSize,
     resetTheme,
@@ -371,6 +391,108 @@ export function SettingsPage({
 
               <div>
                 <div className="text-xs font-semibold text-slate-600">
+                  Màu nền hiển thị (Surface Theme)
+                </div>
+                <div className="mt-1.5 grid grid-cols-2 gap-2 sm:grid-cols-3">
+                  {THEME_SURFACES.map((item) => {
+                    const selected = surface === item.id;
+                    const canvasColor =
+                      item.id === "custom" ? customCanvasHex : item.canvasSwatch;
+                    const cardColor =
+                      item.id === "custom" ? customCardHex : item.cardSwatch;
+                    return (
+                      <button
+                        key={item.id}
+                        type="button"
+                        onClick={() => setSurface(item.id)}
+                        title={item.description}
+                        className={`flex items-center gap-2 rounded-xl border px-2.5 py-2 text-left transition ${
+                          selected
+                            ? "border-indigo-400 bg-indigo-50/70"
+                            : "border-slate-200 hover:bg-slate-50"
+                        }`}
+                      >
+                        <span
+                          className="relative flex h-6 w-6 shrink-0 items-center justify-center rounded-lg border border-black/15"
+                          style={{ backgroundColor: canvasColor }}
+                        >
+                          <span
+                            className="h-3 w-3 rounded-xs border border-black/10"
+                            style={{ backgroundColor: cardColor }}
+                          />
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          <div className="truncate text-xs font-semibold text-slate-900">
+                            {item.label}
+                          </div>
+                          <div className="truncate text-[10px] text-slate-500">
+                            {item.description}
+                          </div>
+                        </div>
+                        {selected && (
+                          <Check className="h-3.5 w-3.5 shrink-0 text-indigo-600" />
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {surface === "custom" && (
+                  <div className="mt-2.5 grid grid-cols-1 gap-2.5 rounded-xl border border-indigo-200 bg-indigo-50/30 p-3 sm:grid-cols-2">
+                    <div>
+                      <label className="block text-[11px] font-semibold text-slate-700">
+                        Màu nền chính (Canvas)
+                      </label>
+                      <div className="mt-1 flex items-center gap-2">
+                        <input
+                          type="color"
+                          value={customCanvasHex}
+                          onChange={(e) =>
+                            setCustomSurfaceColors(e.target.value, customCardHex)
+                          }
+                          aria-label="Chọn màu nền chính"
+                          className="h-8 w-10 cursor-pointer rounded border border-slate-200 bg-transparent p-0.5"
+                        />
+                        <input
+                          type="text"
+                          value={customCanvasHex}
+                          onChange={(e) =>
+                            setCustomSurfaceColors(e.target.value, customCardHex)
+                          }
+                          className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 font-mono text-xs focus:border-indigo-400 focus:outline-none"
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-semibold text-slate-700">
+                        Màu thẻ &amp; khung (Card)
+                      </label>
+                      <div className="mt-1 flex items-center gap-2">
+                        <input
+                          type="color"
+                          value={customCardHex}
+                          onChange={(e) =>
+                            setCustomSurfaceColors(customCanvasHex, e.target.value)
+                          }
+                          aria-label="Chọn màu thẻ và khung"
+                          className="h-8 w-10 cursor-pointer rounded border border-slate-200 bg-transparent p-0.5"
+                        />
+                        <input
+                          type="text"
+                          value={customCardHex}
+                          onChange={(e) =>
+                            setCustomSurfaceColors(customCanvasHex, e.target.value)
+                          }
+                          className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 font-mono text-xs focus:border-indigo-400 focus:outline-none"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <div className="text-xs font-semibold text-slate-600">
                   Bảng màu chủ đạo
                 </div>
                 <div className="mt-1.5 grid grid-cols-2 gap-2 sm:grid-cols-3">
@@ -405,6 +527,54 @@ export function SettingsPage({
                       </button>
                     );
                   })}
+                </div>
+
+                {/* Custom Accent Color Picker */}
+                <div
+                  className={`mt-2.5 flex flex-wrap items-center justify-between gap-2 rounded-xl border px-3 py-2.5 transition ${
+                    accent === "custom"
+                      ? "border-indigo-400 bg-indigo-50/60"
+                      : "border-slate-200 bg-slate-50/60"
+                  }`}
+                >
+                  <button
+                    type="button"
+                    onClick={() => setAccent("custom")}
+                    className="flex items-center gap-2 text-left"
+                  >
+                    <span
+                      className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-black/15"
+                      style={{ backgroundColor: customAccentHex }}
+                    >
+                      {accent === "custom" && (
+                        <Check className="h-3 w-3 text-white" />
+                      )}
+                    </span>
+                    <div>
+                      <div className="text-xs font-semibold text-slate-900">
+                        Tự chọn màu chủ đạo
+                      </div>
+                      <div className="text-[11px] text-slate-500">
+                        Tự sinh đủ dải sắc độ sáng/tối từ mã HEX
+                      </div>
+                    </div>
+                  </button>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="color"
+                      value={customAccentHex}
+                      onChange={(e) => setCustomAccentHex(e.target.value)}
+                      aria-label="Chọn màu chủ đạo tùy chỉnh"
+                      className="h-8 w-10 cursor-pointer rounded border border-slate-200 bg-transparent p-0.5"
+                    />
+                    <input
+                      type="text"
+                      value={customAccentHex}
+                      onChange={(e) => setCustomAccentHex(e.target.value)}
+                      aria-label="Mã HEX màu chủ đạo"
+                      className="w-24 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 font-mono text-xs focus:border-indigo-400 focus:outline-none"
+                    />
+                  </div>
                 </div>
               </div>
             </div>
@@ -473,6 +643,142 @@ export function SettingsPage({
                         <div className="text-xs">{p.label}</div>
                         <div className="font-mono text-[10px] text-slate-500">
                           {p.size}px
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Custom Text Color */}
+              <div>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-xs font-semibold text-slate-600">
+                    Màu chữ hiển thị
+                  </span>
+                  <div className="inline-flex rounded-lg border border-slate-200 bg-slate-100 p-0.5 text-[11px]">
+                    <button
+                      type="button"
+                      onClick={() => setCustomTextEnabled(false)}
+                      className={`rounded-md px-2 py-0.5 font-semibold transition ${
+                        !customTextEnabled
+                          ? "bg-white text-indigo-700 shadow-2xs"
+                          : "text-slate-600 hover:text-slate-900"
+                      }`}
+                    >
+                      Tự động
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setCustomTextEnabled(true)}
+                      className={`rounded-md px-2 py-0.5 font-semibold transition ${
+                        customTextEnabled
+                          ? "bg-white text-indigo-700 shadow-2xs"
+                          : "text-slate-600 hover:text-slate-900"
+                      }`}
+                    >
+                      Tự chọn
+                    </button>
+                  </div>
+                </div>
+                {customTextEnabled ? (
+                  <div className="mt-1.5 flex items-center justify-between gap-2 rounded-xl border border-indigo-200 bg-indigo-50/30 px-3 py-2">
+                    <span className="text-[11px] text-slate-600">
+                      Tự pha chữ chính &amp; chữ phụ theo màu bạn chọn:
+                    </span>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="color"
+                        value={customTextHex}
+                        onChange={(e) => setCustomTextHex(e.target.value)}
+                        aria-label="Chọn màu chữ tùy chỉnh"
+                        className="h-7 w-9 cursor-pointer rounded border border-slate-200 bg-transparent p-0.5"
+                      />
+                      <input
+                        type="text"
+                        value={customTextHex}
+                        onChange={(e) => setCustomTextHex(e.target.value)}
+                        aria-label="Mã HEX màu chữ"
+                        className="w-24 rounded-lg border border-slate-200 bg-white px-2 py-1 font-mono text-xs focus:border-indigo-400 focus:outline-none"
+                      />
+                    </div>
+                  </div>
+                ) : (
+                  <p className="mt-1 text-[11px] text-slate-500">
+                    Đang tự động cân chỉnh màu chữ theo độ sáng của màu nền.
+                  </p>
+                )}
+              </div>
+
+              {/* Font Family */}
+              <div>
+                <div className="text-xs font-semibold text-slate-600">
+                  Font chữ
+                </div>
+                <div className="mt-1.5 grid grid-cols-2 gap-1.5 sm:grid-cols-3">
+                  {THEME_FONTS.map((item) => {
+                    const selected = fontFamily === item.id;
+                    return (
+                      <button
+                        key={item.id}
+                        type="button"
+                        onClick={() => setFontFamily(item.id)}
+                        title={item.description}
+                        style={{
+                          fontFamily:
+                            item.id === "custom" ? undefined : item.stack,
+                        }}
+                        className={`rounded-lg border px-2.5 py-1.5 text-left transition ${
+                          selected
+                            ? "border-indigo-400 bg-indigo-50/70"
+                            : "border-slate-200 hover:bg-slate-50"
+                        }`}
+                      >
+                        <div className="truncate text-xs font-semibold text-slate-900">
+                          {item.label}
+                        </div>
+                        <div className="truncate text-[10px] text-slate-500">
+                          {item.description}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+                {fontFamily === "custom" && (
+                  <input
+                    type="text"
+                    value={customFontFamily}
+                    onChange={(e) => setCustomFontFamily(e.target.value)}
+                    placeholder="VD: Lexend, Be Vietnam Pro, Segoe UI, Arial..."
+                    aria-label="Tên font chữ tùy chỉnh"
+                    className="mt-2 w-full rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs focus:border-indigo-400 focus:outline-none"
+                  />
+                )}
+              </div>
+
+              {/* Font Weight */}
+              <div>
+                <div className="text-xs font-semibold text-slate-600">
+                  Độ dày của chữ
+                </div>
+                <div className="mt-1.5 grid grid-cols-4 gap-1.5">
+                  {THEME_FONT_WEIGHTS.map((w) => {
+                    const selected = fontWeight === w.id;
+                    return (
+                      <button
+                        key={w.id}
+                        type="button"
+                        onClick={() => setFontWeight(w.id)}
+                        style={{ fontWeight: w.numeric }}
+                        className={`rounded-lg border px-2 py-1.5 text-center transition ${
+                          selected
+                            ? "border-indigo-400 bg-indigo-50 text-indigo-800"
+                            : "border-slate-200 text-slate-700 hover:bg-slate-50"
+                        }`}
+                      >
+                        <div className="text-xs">{w.label}</div>
+                        <div className="font-mono text-[10px] text-slate-500">
+                          {w.numeric}
                         </div>
                       </button>
                     );
