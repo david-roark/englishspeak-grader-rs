@@ -5,6 +5,7 @@ use grader_core::{AppPaths, Database, UploadCache};
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 
+use crate::activity_log::ActivityLog;
 use crate::media_server::MediaServer;
 
 pub struct AppState {
@@ -12,6 +13,7 @@ pub struct AppState {
     pub db: Database,
     pub upload_cache: UploadCache,
     pub media_server: MediaServer,
+    pub activity_log: ActivityLog,
     cancel_tokens: Mutex<HashMap<String, CancellationToken>>,
 }
 
@@ -29,11 +31,25 @@ impl AppState {
         let media_server = MediaServer::start()
             .map_err(|e| format!("Không khởi động được media server nội bộ: {e}"))?;
 
+        let activity_log = ActivityLog::new(&paths.data_dir.join("logs"));
+        activity_log.info(
+            "app",
+            format!(
+                "Khởi động v{} ({}/{}, portable={}, media_port={})",
+                env!("CARGO_PKG_VERSION"),
+                std::env::consts::OS,
+                std::env::consts::ARCH,
+                paths.is_portable,
+                media_server.port
+            ),
+        );
+
         Ok(Self {
             paths,
             db,
             upload_cache: UploadCache::new(),
             media_server,
+            activity_log,
             cancel_tokens: Mutex::new(HashMap::new()),
         })
     }

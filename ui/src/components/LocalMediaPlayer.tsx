@@ -119,15 +119,33 @@ export const LocalMediaPlayer = forwardRef<
             setReloadKey((k) => k + 1);
             setErrorMsg(null);
           } else {
-            setErrorMsg(describeMediaError(mediaError));
+            const msg = describeMediaError(mediaError);
+            setErrorMsg(msg);
+            void (api as { logClientEvent?: (l: string, c: string, m: string) => Promise<void> }).logClientEvent?.(
+              "ERROR",
+              "player",
+              `Lỗi phát ${path.split(/[/\\]/).pop() || path}: ${msg}`
+            );
           }
         })
         .catch(() => {
-          setErrorMsg(describeMediaError(mediaError));
+          const msg = describeMediaError(mediaError);
+          setErrorMsg(msg);
+          void (api as { logClientEvent?: (l: string, c: string, m: string) => Promise<void> }).logClientEvent?.(
+            "ERROR",
+            "player",
+            `Lỗi phát ${path.split(/[/\\]/).pop() || path}: ${msg}`
+          );
         });
       return;
     }
-    setErrorMsg(describeMediaError(mediaError));
+    const msg = describeMediaError(mediaError);
+    setErrorMsg(msg);
+    void (api as { logClientEvent?: (l: string, c: string, m: string) => Promise<void> }).logClientEvent?.(
+      "ERROR",
+      "player",
+      `Lỗi phát ${path.split(/[/\\]/).pop() || path}: ${msg}`
+    );
   }
 
   return (

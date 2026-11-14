@@ -318,7 +318,13 @@ pub async fn fetch_models(
 
 #[tauri::command]
 pub async fn cancel_task(state: State<'_, AppState>, task_id: String) -> Result<bool, String> {
-    Ok(state.cancel_task(&task_id).await)
+    let cancelled = state.cancel_task(&task_id).await;
+    if cancelled {
+        state
+            .activity_log
+            .warn("app", format!("Người dùng đã hủy tác vụ: {task_id}"));
+    }
+    Ok(cancelled)
 }
 
 #[tauri::command]
@@ -445,7 +451,31 @@ pub async fn grade_video_cmd(
 
     state.finish_task(&req.task_id).await;
 
-    let result = grade_res.map_err(|e| e.to_string())?;
+    let result = match grade_res {
+        Ok(res) => {
+            state.activity_log.info(
+                "gemini",
+                format!(
+                    "Chấm bài hoàn tất ({}, model {}, {:.1}s).",
+                    video_path
+                        .file_name()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or("video"),
+                    req.model,
+                    started.elapsed().as_secs_f64()
+                ),
+            );
+            res
+        }
+        Err(e) => {
+            let msg = e.to_string();
+            state.activity_log.error(
+                "gemini",
+                format!("Chấm bài thất bại ({}): {msg}", req.model),
+            );
+            return Err(msg);
+        }
+    };
     let elapsed_ms = started.elapsed().as_millis() as u64;
 
     emit_progress(
@@ -590,7 +620,27 @@ pub async fn compress_video_cmd(
     .await;
     state.finish_task(&task_id).await;
 
-    let out_path = res.map_err(|e| e.to_string())?;
+    let out_path = match res {
+        Ok(p) => {
+            state.activity_log.info(
+                "media",
+                format!(
+                    "Nén video thành công: {}",
+                    p.file_name()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or("compressed.mp4")
+                ),
+            );
+            p
+        }
+        Err(e) => {
+            let msg = e.to_string();
+            state
+                .activity_log
+                .error("media", format!("Nén video thất bại: {msg}"));
+            return Err(msg);
+        }
+    };
     Ok(build_media_output(
         &state,
         out_path,
@@ -630,7 +680,27 @@ pub async fn extract_mp3_cmd(
     .await;
     state.finish_task(&task_id).await;
 
-    let out_path = res.map_err(|e| e.to_string())?;
+    let out_path = match res {
+        Ok(p) => {
+            state.activity_log.info(
+                "media",
+                format!(
+                    "Tách MP3 thành công: {}",
+                    p.file_name()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or("audio.mp3")
+                ),
+            );
+            p
+        }
+        Err(e) => {
+            let msg = e.to_string();
+            state
+                .activity_log
+                .error("media", format!("Tách MP3 thất bại: {msg}"));
+            return Err(msg);
+        }
+    };
     Ok(build_media_output(
         &state,
         out_path,
@@ -675,7 +745,27 @@ pub async fn trim_media_cmd(
     .await;
     state.finish_task(&task_id).await;
 
-    let out_path = res.map_err(|e| e.to_string())?;
+    let out_path = match res {
+        Ok(p) => {
+            state.activity_log.info(
+                "media",
+                format!(
+                    "Cắt media thành công: {}",
+                    p.file_name()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or("trimmed.mp4")
+                ),
+            );
+            p
+        }
+        Err(e) => {
+            let msg = e.to_string();
+            state
+                .activity_log
+                .error("media", format!("Cắt media thất bại: {msg}"));
+            return Err(msg);
+        }
+    };
     Ok(build_media_output(
         &state,
         out_path,
@@ -713,7 +803,27 @@ pub async fn mute_video_cmd(
     .await;
     state.finish_task(&task_id).await;
 
-    let out_path = res.map_err(|e| e.to_string())?;
+    let out_path = match res {
+        Ok(p) => {
+            state.activity_log.info(
+                "media",
+                format!(
+                    "Tắt tiếng video thành công: {}",
+                    p.file_name()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or("muted.mp4")
+                ),
+            );
+            p
+        }
+        Err(e) => {
+            let msg = e.to_string();
+            state
+                .activity_log
+                .error("media", format!("Tắt tiếng video thất bại: {msg}"));
+            return Err(msg);
+        }
+    };
     Ok(build_media_output(
         &state,
         out_path,
@@ -922,7 +1032,27 @@ pub async fn generate_script_cmd(
         client.cleanup_file(&uploaded.name).await;
     }
 
-    let transcript = transcript_res.map_err(|e| e.to_string())?;
+    let transcript = match transcript_res {
+        Ok(t) => {
+            state.activity_log.info(
+                "subtitle",
+                format!(
+                    "Tạo Script thành công ({source_name}, model {}, {} câu thoại).",
+                    req.model,
+                    t.segments.len()
+                ),
+            );
+            t
+        }
+        Err(e) => {
+            let msg = e.to_string();
+            state.activity_log.error(
+                "subtitle",
+                format!("Tạo Script thất bại ({source_name}): {msg}"),
+            );
+            return Err(msg);
+        }
+    };
 
     emit_progress(&app, &req.task_id, "Đang lưu file Script...", Some(95.0));
 
@@ -1055,7 +1185,28 @@ pub async fn embed_subtitles_video_cmd(
     state.finish_task(&req.task_id).await;
     let _ = tokio::fs::remove_file(&temp_sub_path).await;
 
-    let out_path = res.map_err(|e| e.to_string())?;
+    let out_path = match res {
+        Ok(p) => {
+            state.activity_log.info(
+                "media",
+                format!(
+                    "Xuất video phụ đề ({}) thành công: {}",
+                    if burn_in { "hardsub" } else { "softsub" },
+                    p.file_name()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or("output.mp4")
+                ),
+            );
+            p
+        }
+        Err(e) => {
+            let msg = e.to_string();
+            state
+                .activity_log
+                .error("media", format!("Xuất video phụ đề thất bại: {msg}"));
+            return Err(msg);
+        }
+    };
     let fallback_name = if burn_in {
         "subtitled.mp4"
     } else {
@@ -1414,7 +1565,97 @@ pub fn save_settings(
             .map_err(|e| e.to_string())?;
     }
 
+    state
+        .activity_log
+        .info("app", "Đã cập nhật cài đặt hệ thống.");
     get_bootstrap(state)
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct AppDiagnostics {
+    pub app_name: String,
+    pub app_version: String,
+    pub os: String,
+    pub arch: String,
+    pub is_portable: bool,
+    pub data_dir: String,
+    pub db_path: String,
+    pub exports_dir: String,
+    pub log_file_path: String,
+    pub ffmpeg_path: Option<String>,
+    pub fonts_dir: Option<String>,
+    pub media_server_port: u16,
+    pub license_summary: String,
+    pub logs: Vec<crate::activity_log::ActivityLogEntry>,
+}
+
+#[tauri::command]
+pub fn get_diagnostics(state: State<'_, AppState>) -> AppDiagnostics {
+    let custom_ffmpeg = state.effective_ffmpeg_custom_path();
+    let ffmpeg_path = resolve_ffmpeg(custom_ffmpeg.as_deref(), Some(&state.paths.bin_dir))
+        .map(|p| p.to_string_lossy().into_owned());
+    let fonts_dir = state
+        .resolve_fonts_dir()
+        .map(|p| p.to_string_lossy().into_owned());
+
+    AppDiagnostics {
+        app_name: "EnglishSpeak Grader".to_string(),
+        app_version: env!("CARGO_PKG_VERSION").to_string(),
+        os: std::env::consts::OS.to_string(),
+        arch: std::env::consts::ARCH.to_string(),
+        is_portable: state.paths.is_portable,
+        data_dir: state.paths.data_dir.to_string_lossy().into_owned(),
+        db_path: state.paths.db_path.to_string_lossy().into_owned(),
+        exports_dir: state.effective_export_dir().to_string_lossy().into_owned(),
+        log_file_path: state
+            .activity_log
+            .log_file_path()
+            .to_string_lossy()
+            .into_owned(),
+        ffmpeg_path,
+        fonts_dir,
+        media_server_port: state.media_server.port,
+        license_summary: "Personal & Non-Commercial Use License (All Rights Reserved)".to_string(),
+        logs: state.activity_log.entries(),
+    }
+}
+
+#[tauri::command]
+pub fn clear_activity_logs(state: State<'_, AppState>) -> AppDiagnostics {
+    state.activity_log.clear();
+    state
+        .activity_log
+        .info("app", "Đã xoá nhật ký hoạt động cũ.");
+    get_diagnostics(state)
+}
+
+#[tauri::command]
+pub fn log_client_event(
+    state: State<'_, AppState>,
+    level: String,
+    category: String,
+    message: String,
+) {
+    state.activity_log.record(&level, &category, &message);
+}
+
+#[tauri::command]
+pub fn open_diagnostic_path(app: AppHandle, path: String) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+
+    let target = PathBuf::from(path.trim());
+    if !target.exists() {
+        if let Some(parent) = target.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        if target.extension().and_then(|e| e.to_str()) == Some("log") {
+            let _ = std::fs::write(&target, b"");
+        }
+    }
+    let path_str = target.to_string_lossy().into_owned();
+    app.opener()
+        .open_path(&path_str, None::<&str>)
+        .map_err(|e| format!("Không thể mở đường dẫn {path_str}: {e}"))
 }
 
 #[cfg(test)]

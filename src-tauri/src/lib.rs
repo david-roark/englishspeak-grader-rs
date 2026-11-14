@@ -1,3 +1,4 @@
+mod activity_log;
 mod commands;
 mod media_server;
 mod state;
@@ -65,6 +66,10 @@ pub fn run() {
             commands::reset_prompt_profile,
             commands::preview_grading_prompt,
             commands::save_settings,
+            commands::get_diagnostics,
+            commands::clear_activity_logs,
+            commands::log_client_event,
+            commands::open_diagnostic_path,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

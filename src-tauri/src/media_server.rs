@@ -20,7 +20,7 @@ const MAX_LINE_BYTES: usize = 8192;
 /// Access is restricted to `127.0.0.1`, protected by a per-session random token,
 /// and limited strictly to canonicalized file paths explicitly authorized by app commands.
 pub struct MediaServer {
-    port: u16,
+    pub port: u16,
     token: String,
     allowed_paths: Arc<RwLock<HashSet<PathBuf>>>,
 }

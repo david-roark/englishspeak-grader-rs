@@ -4,6 +4,7 @@ import { open, save } from "@tauri-apps/plugin-dialog";
 import { openPath, revealItemInDir } from "@tauri-apps/plugin-opener";
 import type {
   AppBootstrap,
+  AppDiagnostics,
   AssessmentDetail,
   AssessmentSummary,
   AssignmentImage,
@@ -480,4 +481,11 @@ export const api = {
     }
     return convertFileSrc(path);
   },
+
+  getDiagnostics: () => invoke<AppDiagnostics>("get_diagnostics"),
+  clearActivityLogs: () => invoke<AppDiagnostics>("clear_activity_logs"),
+  logClientEvent: (level: string, category: string, message: string) =>
+    invoke<void>("log_client_event", { level, category, message }).catch(() => {}),
+  openDiagnosticPath: (path: string) =>
+    invoke<void>("open_diagnostic_path", { path }),
 };

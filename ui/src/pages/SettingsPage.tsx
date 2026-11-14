@@ -13,6 +13,7 @@ import {
   Type,
 } from "lucide-react";
 import { api, MEDIA_RES_OPTIONS } from "../lib/api";
+import { AboutDiagnosticsSection } from "../components/AboutDiagnosticsSection";
 import { PromptConfigSection } from "../components/PromptConfigSection";
 import { SelectField } from "../components/SelectField";
 import {
@@ -442,6 +443,9 @@ export function SettingsPage({
         bootstrap={bootstrap}
         onBootstrapUpdated={onBootstrapUpdated}
       />
+
+      {/* About, Environment & Activity Log */}
+      <AboutDiagnosticsSection />
     </div>
   );
 }

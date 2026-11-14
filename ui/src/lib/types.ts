@@ -231,3 +231,27 @@ export interface GenerateScriptResponse {
   mp3_output: MediaOutput | null;
   reused_upload_cache: boolean;
 }
+
+export interface ActivityLogEntry {
+  timestamp_ms: number;
+  level: "INFO" | "WARN" | "ERROR" | string;
+  category: string;
+  message: string;
+}
+
+export interface AppDiagnostics {
+  app_name: string;
+  app_version: string;
+  os: string;
+  arch: string;
+  is_portable: boolean;
+  data_dir: string;
+  db_path: string;
+  exports_dir: string;
+  log_file_path: string;
+  ffmpeg_path: string | null;
+  fonts_dir: string | null;
+  media_server_port: number;
+  license_summary: string;
+  logs: ActivityLogEntry[];
+}
