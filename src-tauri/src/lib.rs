@@ -25,6 +25,7 @@ pub fn run() {
             commands::mute_video_cmd,
             commands::generate_script_cmd,
             commands::export_transcript_file,
+            commands::embed_subtitles_video_cmd,
             commands::list_rubrics,
             commands::save_custom_rubric,
             commands::clone_rubric,

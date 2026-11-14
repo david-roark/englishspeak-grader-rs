@@ -286,27 +286,66 @@ fn format_srt_timestamp(secs: f64) -> String {
     format!("{h:02}:{m:02}:{s:02},{ms:03}")
 }
 
+fn format_ass_timestamp(secs: f64) -> String {
+    let total_cs = (secs.max(0.0) * 100.0).round() as u64;
+    let cs = total_cs % 100;
+    let total_s = total_cs / 100;
+    let s = total_s % 60;
+    let total_m = total_s / 60;
+    let m = total_m % 60;
+    let h = total_m / 60;
+    format!("{h}:{m:02}:{s:02}.{cs:02}")
+}
+
+fn segment_time_bounds(idx: usize, seg: &TranscriptSegment) -> (f64, f64) {
+    let start_secs = parse_timecode_secs(&seg.start_time).unwrap_or((idx as f64) * 3.0);
+    let end_secs = match parse_timecode_secs(&seg.end_time) {
+        Some(e) if e > start_secs => e,
+        _ => start_secs + 3.0,
+    };
+    (start_secs, end_secs)
+}
+
+fn subtitle_content_flags(content_mode: &str) -> (bool, bool) {
+    match content_mode.trim().to_ascii_lowercase().as_str() {
+        "text_only" => (false, false),
+        "bilingual" => (true, false),
+        "with_grammar" => (false, true),
+        _ => (true, true),
+    }
+}
+
+fn effective_segment_label(seg: &TranscriptSegment) -> &str {
+    let trimmed = seg.speaker_label.trim();
+    if trimmed.is_empty() {
+        role_display_vi(&seg.role)
+    } else {
+        trimmed
+    }
+}
+
 /// Xuất script sang định dạng phụ đề chuẩn SubRip (`.srt`).
 pub fn format_transcript_srt(result: &TranscriptResult) -> String {
+    format_transcript_srt_with_mode(result, "bilingual")
+}
+
+/// Xuất script sang `.srt` theo chế độ nội dung (`text_only`, `bilingual`, `with_grammar`, `all`).
+pub fn format_transcript_srt_with_mode(result: &TranscriptResult, content_mode: &str) -> String {
+    let (include_translation, include_grammar) = subtitle_content_flags(content_mode);
     let mut blocks = Vec::new();
     for (idx, seg) in result.segments.iter().enumerate() {
-        let start_secs = parse_timecode_secs(&seg.start_time).unwrap_or((idx as f64) * 3.0);
-        let parsed_end = parse_timecode_secs(&seg.end_time);
-        let end_secs = match parsed_end {
-            Some(e) if e > start_secs => e,
-            _ => start_secs + 3.0,
-        };
-
-        let label = if seg.speaker_label.trim().is_empty() {
-            role_display_vi(&seg.role)
-        } else {
-            seg.speaker_label.trim()
-        };
+        let (start_secs, end_secs) = segment_time_bounds(idx, seg);
+        let label = effective_segment_label(seg);
 
         let mut content = format!("[{label}]: {}", seg.text.trim());
-        if !seg.translation.trim().is_empty() {
+        if include_translation && !seg.translation.trim().is_empty() {
             content.push('\n');
             content.push_str(seg.translation.trim());
+        }
+        if include_grammar && !seg.grammar_note.trim().is_empty() {
+            content.push('\n');
+            content.push_str("💡 Sửa: ");
+            content.push_str(seg.grammar_note.trim());
         }
 
         blocks.push(format!(
@@ -322,6 +361,67 @@ pub fn format_transcript_srt(result: &TranscriptResult) -> String {
     } else {
         blocks.join("\n\n") + "\n"
     }
+}
+
+fn escape_ass_text(raw: &str) -> String {
+    raw.trim()
+        .replace('{', "(")
+        .replace('}', ")")
+        .replace("\r\n", "\\N")
+        .replace(['\n', '\r'], "\\N")
+}
+
+/// Xuất script sang định dạng ASS (`.ass`) có tô màu vai trò Giáo viên / Học sinh để đốt lên video.
+pub fn format_transcript_ass(result: &TranscriptResult, content_mode: &str) -> String {
+    let (include_translation, include_grammar) = subtitle_content_flags(content_mode);
+    let mut lines = vec![
+        "[Script Info]".to_string(),
+        "ScriptType: v4.00+".to_string(),
+        "PlayResX: 1280".to_string(),
+        "PlayResY: 720".to_string(),
+        "WrapStyle: 0".to_string(),
+        "ScaledBorderAndShadow: yes".to_string(),
+        String::new(),
+        "[V4+ Styles]".to_string(),
+        "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding".to_string(),
+        "Style: Default,DejaVu Sans,28,&H00FFFFFF,&H000000FF,&H00000000,&H80000000,0,0,0,0,100,100,0,0,1,2,1,2,30,30,28,1".to_string(),
+        String::new(),
+        "[Events]".to_string(),
+        "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text".to_string(),
+    ];
+
+    for (idx, seg) in result.segments.iter().enumerate() {
+        let (start_secs, end_secs) = segment_time_bounds(idx, seg);
+        let label = escape_ass_text(effective_segment_label(seg));
+        let speaker_tag = match seg.role.trim().to_ascii_lowercase().as_str() {
+            "teacher" => format!("{{\\b1\\c&H00D4FF&}}[Giáo viên - {label}]:{{\\b0\\c&HFFFFFF&}}"),
+            "student" => format!("{{\\b1\\c&H80FF80&}}[{label}]:{{\\b0\\c&HFFFFFF&}}"),
+            _ => format!("{{\\b1\\c&HFFCC80&}}[{label}]:{{\\b0\\c&HFFFFFF&}}"),
+        };
+
+        let mut dialogue_text = format!("{speaker_tag} {}", escape_ass_text(&seg.text));
+        if include_translation && !seg.translation.trim().is_empty() {
+            dialogue_text.push_str(&format!(
+                "\\N{{\\fs23\\c&HE8E8E8&}}Dịch: {}",
+                escape_ass_text(&seg.translation)
+            ));
+        }
+        if include_grammar && !seg.grammar_note.trim().is_empty() {
+            dialogue_text.push_str(&format!(
+                "\\N{{\\fs23\\c&H80D8FF&}}Sửa: {}",
+                escape_ass_text(&seg.grammar_note)
+            ));
+        }
+
+        lines.push(format!(
+            "Dialogue: 0,{},{},Default,,0,0,0,,{}",
+            format_ass_timestamp(start_secs),
+            format_ass_timestamp(end_secs),
+            dialogue_text
+        ));
+    }
+
+    lines.join("\n") + "\n"
 }
 
 fn inline_and_clean_schema(node: &Value, defs: &Map<String, Value>) -> Value {

@@ -3,13 +3,13 @@ use std::time::{Duration, Instant};
 
 use grader_core::export::{default_export_path, export_to_excel};
 use grader_core::{
-    build_prompt_parts, compress_video_to, extract_mp3_to, extract_speech_mp3_to, fmt_num,
-    format_result_markdown, format_transcript_markdown, format_transcript_srt,
-    format_transcript_text, mp3_presets, mute_video_to, probe_duration_secs, resolve_ffmpeg,
-    trim_media_to, video_presets, AssessmentDetail, AssessmentSummary, AssignmentImage,
-    GeminiClient, GradingAssignment, MediaResolution, Mp3Preset, NewAssessment, PromptParts,
-    PromptProfile, Rubric, TranscribeOptions, TranscriptResult, VideoPreset, DEFAULT_MODEL,
-    FALLBACK_MODELS,
+    build_prompt_parts, compress_video_to, embed_subtitles_video_to, extract_mp3_to,
+    extract_speech_mp3_to, fmt_num, format_result_markdown, format_transcript_ass,
+    format_transcript_markdown, format_transcript_srt_with_mode, format_transcript_text,
+    mp3_presets, mute_video_to, probe_duration_secs, resolve_ffmpeg, trim_media_to, video_presets,
+    AssessmentDetail, AssessmentSummary, AssignmentImage, GeminiClient, GradingAssignment,
+    MediaResolution, Mp3Preset, NewAssessment, PromptParts, PromptProfile, Rubric,
+    TranscribeOptions, TranscriptResult, VideoPreset, DEFAULT_MODEL, FALLBACK_MODELS,
 };
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State};
@@ -121,6 +121,17 @@ pub struct GenerateScriptResponse {
     pub script_output: MediaOutput,
     pub mp3_output: Option<MediaOutput>,
     pub reused_upload_cache: bool,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct EmbedSubtitlesRequest {
+    pub task_id: String,
+    pub video_path: String,
+    pub transcript: TranscriptResult,
+    pub burn_mode: String,
+    pub content_mode: String,
+    pub out_dir_override: Option<String>,
+    pub out_path_override: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -676,7 +687,7 @@ fn render_transcript_by_format(
     format: &str,
 ) -> (String, &'static str) {
     match format.trim().to_ascii_lowercase().as_str() {
-        "srt" => (format_transcript_srt(transcript), "srt"),
+        "srt" => (format_transcript_srt_with_mode(transcript, "all"), "srt"),
         "txt" => (format_transcript_text(transcript, source_name), "txt"),
         _ => (format_transcript_markdown(transcript, source_name), "md"),
     }
@@ -915,6 +926,78 @@ pub fn export_transcript_file(
     write_transcript_to_path(&transcript, &source_name, &format, &target)?;
     let fallback_name = format!("script.{ext}");
     Ok(build_media_output(&state, target, 0.0, &fallback_name))
+}
+
+#[tauri::command]
+pub async fn embed_subtitles_video_cmd(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    req: EmbedSubtitlesRequest,
+) -> Result<MediaOutput, String> {
+    let ffmpeg = resolve_ffmpeg_for_state(&state)?;
+    let src = PathBuf::from(&req.video_path);
+    if !src.is_file() {
+        return Err("Chưa chọn file video gốc hợp lệ.".into());
+    }
+    if req.transcript.segments.is_empty() {
+        return Err("Script chưa có dòng thoại nào để ghép vào video.".into());
+    }
+    state.media_server.authorize_path(&src);
+
+    let orig_size_mb = std::fs::metadata(&src)
+        .map(|m| m.len() as f64 / (1024.0 * 1024.0))
+        .unwrap_or(0.0);
+    let (out_dir, out_file) =
+        resolve_media_output_targets(&state, req.out_dir_override, req.out_path_override);
+
+    let burn_in = !req.burn_mode.trim().eq_ignore_ascii_case("softsub");
+    let safe_id: String = req
+        .task_id
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+        .collect();
+    let (sub_ext, sub_content) = if burn_in {
+        (
+            "ass",
+            format_transcript_ass(&req.transcript, &req.content_mode),
+        )
+    } else {
+        (
+            "srt",
+            format_transcript_srt_with_mode(&req.transcript, &req.content_mode),
+        )
+    };
+    let temp_sub_path = std::env::temp_dir().join(format!("englishspeak_sub_{safe_id}.{sub_ext}"));
+    std::fs::write(&temp_sub_path, sub_content)
+        .map_err(|e| format!("Không ghi được file phụ đề tạm: {e}"))?;
+
+    let cancel = state.register_task(&req.task_id).await;
+    let res = embed_subtitles_video_to(
+        &ffmpeg,
+        &src,
+        &temp_sub_path,
+        burn_in,
+        &out_dir,
+        out_file.as_deref(),
+        |p| emit_progress(&app, &req.task_id, p.stage, p.percent),
+        Some(&cancel),
+    )
+    .await;
+    state.finish_task(&req.task_id).await;
+    let _ = tokio::fs::remove_file(&temp_sub_path).await;
+
+    let out_path = res.map_err(|e| e.to_string())?;
+    let fallback_name = if burn_in {
+        "subtitled.mp4"
+    } else {
+        "softsub.mp4"
+    };
+    Ok(build_media_output(
+        &state,
+        out_path,
+        orig_size_mb,
+        fallback_name,
+    ))
 }
 
 #[tauri::command]

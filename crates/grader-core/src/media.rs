@@ -439,6 +439,80 @@ pub fn build_mute_video_args_to(video_path: &Path, out_path: &Path) -> Vec<Strin
     args
 }
 
+/// Escape đường dẫn file phụ đề để truyền an toàn vào `-vf ass=...` của `ffmpeg`.
+pub fn escape_ffmpeg_filter_path(path: &Path) -> String {
+    let forward = path.to_string_lossy().replace('\\', "/");
+    let mut out = String::with_capacity(forward.len() + 8);
+    for ch in forward.chars() {
+        if matches!(ch, ':' | '\'' | '[' | ']' | ',' | ';') {
+            out.push('\\');
+        }
+        out.push(ch);
+    }
+    out
+}
+
+/// Dựng tham số CLI `ffmpeg` cho ghép phụ đề/script vào video (`burn_in = true`: hardsub ASS, `false`: softsub `mov_text`).
+pub fn build_embed_subtitles_video_args_to(
+    video_path: &Path,
+    subtitle_path: &Path,
+    burn_in: bool,
+    out_path: &Path,
+) -> Vec<String> {
+    let mut args = vec![
+        "-y".into(),
+        "-i".into(),
+        video_path.to_string_lossy().into_owned(),
+    ];
+
+    if burn_in {
+        let escaped = escape_ffmpeg_filter_path(subtitle_path);
+        args.extend([
+            "-vf".into(),
+            format!("ass={escaped}"),
+            "-c:v".into(),
+            "libx264".into(),
+            "-preset".into(),
+            "fast".into(),
+            "-crf".into(),
+            "23".into(),
+            "-c:a".into(),
+            "aac".into(),
+            "-b:a".into(),
+            "128k".into(),
+        ]);
+    } else {
+        args.extend(["-i".into(), subtitle_path.to_string_lossy().into_owned()]);
+        if is_mp4_family(video_path) {
+            args.extend(["-c:v".into(), "copy".into(), "-c:a".into(), "copy".into()]);
+        } else {
+            args.extend([
+                "-c:v".into(),
+                "libx264".into(),
+                "-preset".into(),
+                "fast".into(),
+                "-crf".into(),
+                "23".into(),
+                "-c:a".into(),
+                "aac".into(),
+                "-b:a".into(),
+                "128k".into(),
+            ]);
+        }
+        args.extend(["-c:s".into(), "mov_text".into()]);
+    }
+
+    args.extend([
+        "-movflags".into(),
+        "+faststart".into(),
+        "-progress".into(),
+        "pipe:1".into(),
+        "-nostats".into(),
+        out_path.to_string_lossy().into_owned(),
+    ]);
+    args
+}
+
 /// Đọc thời lượng video (giây) từ stderr của `ffmpeg -i`.
 pub async fn probe_duration_secs(ffmpeg_exe: &Path, video_path: &Path) -> Option<f64> {
     let out = Command::new(ffmpeg_exe)
@@ -778,6 +852,58 @@ where
         "Đang tắt tiếng video...",
         "Tắt tiếng video hoàn tất.",
         "Tắt tiếng video thất bại",
+        false,
+        on_progress,
+        cancel,
+    )
+    .await
+}
+
+/// Ghép phụ đề/script vào video (`burn_in = true`: in cứng `.ass` lên hình, `false`: nhúng phụ đề mềm `.srt`).
+#[allow(clippy::too_many_arguments)]
+pub async fn embed_subtitles_video_to<F>(
+    ffmpeg_exe: &Path,
+    video_path: &Path,
+    subtitle_path: &Path,
+    burn_in: bool,
+    default_out_dir: &Path,
+    out_path_override: Option<&Path>,
+    on_progress: F,
+    cancel: Option<&CancellationToken>,
+) -> Result<PathBuf>
+where
+    F: FnMut(MediaProgress) + Send,
+{
+    ensure_input_exists(video_path, false)?;
+    if !subtitle_path.exists() {
+        return Err(GraderError::Video(format!(
+            "Không tìm thấy file phụ đề tạm: {}",
+            subtitle_path.display()
+        )));
+    }
+    let (stem, _) = file_stem_and_ext(video_path, "video", "mp4");
+    let default_name = if burn_in {
+        format!("{stem}_subtitled.mp4")
+    } else {
+        format!("{stem}_softsub.mp4")
+    };
+    let out_path = resolve_target_path(default_out_dir, default_name, out_path_override);
+    let duration_secs = probe_duration_secs(ffmpeg_exe, video_path).await;
+    let args = build_embed_subtitles_video_args_to(video_path, subtitle_path, burn_in, &out_path);
+    let running_stage = if burn_in {
+        "Đang đốt phụ đề script lên video..."
+    } else {
+        "Đang nhúng phụ đề mềm vào video..."
+    };
+
+    execute_ffmpeg_media_job(
+        ffmpeg_exe,
+        out_path,
+        args,
+        duration_secs,
+        running_stage,
+        "Ghép script vào video hoàn tất.",
+        "Ghép script vào video thất bại",
         false,
         on_progress,
         cancel,

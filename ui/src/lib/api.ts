@@ -172,6 +172,16 @@ export const api = {
       outPath: params.outPath,
     }),
 
+  embedSubtitlesVideo: (req: {
+    task_id: string;
+    video_path: string;
+    transcript: TranscriptResult;
+    burn_mode: "hardsub" | "softsub";
+    content_mode: "all" | "with_grammar" | "bilingual" | "text_only";
+    out_dir_override?: string;
+    out_path_override?: string;
+  }) => invoke<MediaOutput>("embed_subtitles_video_cmd", { req }),
+
   listRubrics: () => invoke<Rubric[]>("list_rubrics"),
   saveCustomRubric: (rubric: Rubric) =>
     invoke<Rubric[]>("save_custom_rubric", { rubric }),

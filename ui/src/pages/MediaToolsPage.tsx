@@ -6,13 +6,17 @@ import {
   Download,
   ExternalLink,
   FileText,
+  Film,
   FolderOpen,
   Minimize2,
   Music,
+  Pencil,
   Play,
+  Plus,
   Scissors,
   Search,
   Sparkles,
+  Trash2,
   Users,
   VolumeX,
 } from "lucide-react";
@@ -43,6 +47,7 @@ import type {
   MediaOutput,
   Mp3Preset,
   TranscriptResult,
+  TranscriptSegment,
   VideoPreset,
 } from "../lib/types";
 
@@ -231,6 +236,14 @@ export function MediaToolsPage({
   const [copiedMd, setCopiedMd] = useState(false);
   const [exportBusy, setExportBusy] = useState(false);
   const [exportNotice, setExportNotice] = useState("");
+  const [playerCurrentTime, setPlayerCurrentTime] = useState(0);
+  const [editingSegIdx, setEditingSegIdx] = useState<number | null>(null);
+  const [burnMode, setBurnMode] = useState<"hardsub" | "softsub">("hardsub");
+  const [subtitleContentMode, setSubtitleContentMode] = useState<
+    "all" | "with_grammar" | "bilingual" | "text_only"
+  >("all");
+  const [subtitledVideoOutput, setSubtitledVideoOutput] =
+    useState<MediaOutput | null>(null);
   const [sessionHistory, setSessionHistory] = useState<SessionHistoryItem[]>([]);
 
   const isSourceAudio = sourceFile ? isAudioFilePath(sourceFile.path) : false;
@@ -244,6 +257,9 @@ export function MediaToolsPage({
     setErrMsg("");
     setLatestResult(null);
     setScriptResult(null);
+    setSubtitledVideoOutput(null);
+    setEditingSegIdx(null);
+    setPlayerCurrentTime(0);
     setScriptSearch("");
     setExportNotice("");
     try {
@@ -289,6 +305,9 @@ export function MediaToolsPage({
     setDurationSecs(null);
     setLatestResult(null);
     setScriptResult(null);
+    setSubtitledVideoOutput(null);
+    setEditingSegIdx(null);
+    setPlayerCurrentTime(0);
     setExportNotice("");
     setErrMsg("");
     if (outputTarget.mode === "custom_file") {
@@ -395,6 +414,163 @@ export function MediaToolsPage({
         },
       };
     });
+  }
+
+  function updateSegmentAt(
+    idx: number,
+    patch: Partial<TranscriptSegment>
+  ) {
+    setExportNotice("");
+    setScriptResult((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        transcript: {
+          ...prev.transcript,
+          segments: prev.transcript.segments.map((seg, i) =>
+            i === idx ? { ...seg, ...patch } : seg
+          ),
+        },
+      };
+    });
+  }
+
+  function assignSegmentSpeaker(idx: number, speakerId: string) {
+    if (!scriptResult) return;
+    const sp = scriptResult.transcript.speakers.find((s) => s.id === speakerId);
+    if (!sp) return;
+    updateSegmentAt(idx, {
+      speaker_id: sp.id,
+      speaker_label: sp.label,
+      role: sp.role,
+    });
+  }
+
+  function captureSegmentTime(idx: number, field: "start_time" | "end_time") {
+    const current = playerRef.current?.currentTime ?? playerCurrentTime;
+    if (!Number.isFinite(current)) return;
+    updateSegmentAt(idx, { [field]: formatEditableTimecode(current) });
+  }
+
+  function insertSegmentAfter(idx: number | null) {
+    if (!scriptResult) return;
+    const defaultSpeaker = scriptResult.transcript.speakers[0] ?? {
+      id: "S1",
+      label: "Học sinh 1",
+      role: "student",
+      name_confident: false,
+    };
+    const prevSeg =
+      idx !== null ? scriptResult.transcript.segments[idx] : undefined;
+    const baseStartSecs = prevSeg
+      ? parseTimecodeToSeconds(prevSeg.end_time || prevSeg.start_time) ?? 0
+      : playerCurrentTime;
+    const newSeg: TranscriptSegment = {
+      start_time: formatEditableTimecode(baseStartSecs),
+      end_time: formatEditableTimecode(baseStartSecs + 3),
+      speaker_id: defaultSpeaker.id,
+      speaker_label: defaultSpeaker.label,
+      role: defaultSpeaker.role,
+      text: "",
+      translation: "",
+      grammar_note: "",
+    };
+
+    const insertPos =
+      idx === null ? scriptResult.transcript.segments.length : idx + 1;
+    setScriptResult((prev) => {
+      if (!prev) return prev;
+      const nextSegments = [...prev.transcript.segments];
+      nextSegments.splice(insertPos, 0, newSeg);
+      return {
+        ...prev,
+        transcript: {
+          ...prev.transcript,
+          segments: nextSegments,
+        },
+      };
+    });
+    setEditingSegIdx(insertPos);
+    setExportNotice("");
+  }
+
+  function deleteSegmentAt(idx: number) {
+    setExportNotice("");
+    setEditingSegIdx((cur) => {
+      if (cur === null) return null;
+      if (cur === idx) return null;
+      return cur > idx ? cur - 1 : cur;
+    });
+    setScriptResult((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        transcript: {
+          ...prev.transcript,
+          segments: prev.transcript.segments.filter((_, i) => i !== idx),
+        },
+      };
+    });
+  }
+
+  async function handleEmbedSubtitlesVideo() {
+    if (!sourceFile || !scriptResult || isSourceAudio) return;
+    if (scriptResult.transcript.segments.length === 0) {
+      setErrMsg("Script chưa có dòng thoại nào để ghép vào video.");
+      return;
+    }
+
+    setErrMsg("");
+    setSubtitledVideoOutput(null);
+    const overrides = resolveOutputOverrides(outputTarget, sourceFile.path);
+    const mp4PathOverride =
+      overrides.outPathOverride &&
+      /\.(mp4|mov|m4v)$/i.test(overrides.outPathOverride)
+        ? overrides.outPathOverride
+        : undefined;
+
+    const id = `media_studio_subvideo_${Date.now()}`;
+    setTaskId(id);
+    setStage(
+      burnMode === "hardsub"
+        ? "Đang chuẩn bị ghép Script cứng lên video..."
+        : "Đang chuẩn bị nhúng phụ đề mềm vào video..."
+    );
+    setPercent(0);
+
+    const unlisten = await api.listenProgress(id, (p) => {
+      setStage(p.stage);
+      setPercent(p.percent);
+    });
+
+    try {
+      const out = await api.embedSubtitlesVideo({
+        task_id: id,
+        video_path: sourceFile.path,
+        transcript: scriptResult.transcript,
+        burn_mode: burnMode,
+        content_mode: subtitleContentMode,
+        out_dir_override: overrides.outDirOverride,
+        out_path_override: mp4PathOverride,
+      });
+      setSubtitledVideoOutput(out);
+      setSessionHistory((prev) => [
+        {
+          id,
+          toolLabel:
+            burnMode === "hardsub"
+              ? "Video + Script (In cứng)"
+              : "Video + Script (Phụ đề mềm)",
+          output: out,
+        },
+        ...prev.slice(0, 7),
+      ]);
+    } catch (e) {
+      setErrMsg(String(e));
+    } finally {
+      unlisten();
+      setTaskId(null);
+    }
   }
 
   async function handleCopyScriptMarkdown() {
@@ -600,16 +776,44 @@ export function MediaToolsPage({
 
   const filteredSegments = useMemo(() => {
     if (!scriptResult) return [];
+    const indexed = scriptResult.transcript.segments.map((seg, originalIdx) => ({
+      seg,
+      originalIdx,
+    }));
     const q = scriptSearch.trim().toLowerCase();
-    if (!q) return scriptResult.transcript.segments;
-    return scriptResult.transcript.segments.filter(
-      (seg) =>
+    if (!q) return indexed;
+    return indexed.filter(
+      ({ seg }) =>
         seg.text.toLowerCase().includes(q) ||
         seg.speaker_label.toLowerCase().includes(q) ||
         seg.translation.toLowerCase().includes(q) ||
         seg.grammar_note.toLowerCase().includes(q)
     );
   }, [scriptResult, scriptSearch]);
+
+  const activeSegmentIdx = useMemo(() => {
+    if (!scriptResult) return -1;
+    const segs = scriptResult.transcript.segments;
+    for (let i = 0; i < segs.length; i++) {
+      const s = parseTimecodeToSeconds(
+        segs[i].start_time.trim().replace(/^\[|\]$/g, "")
+      );
+      if (s === null) continue;
+      const parsedEnd = parseTimecodeToSeconds(
+        segs[i].end_time.trim().replace(/^\[|\]$/g, "")
+      );
+      const e = parsedEnd !== null && parsedEnd > s ? parsedEnd : s + 3;
+      if (playerCurrentTime >= s && playerCurrentTime <= e) {
+        return i;
+      }
+    }
+    return -1;
+  }, [scriptResult, playerCurrentTime]);
+
+  const activePreviewSegment =
+    scriptResult && activeSegmentIdx >= 0
+      ? scriptResult.transcript.segments[activeSegmentIdx]
+      : null;
 
   return (
     <div className="space-y-4">
@@ -652,12 +856,54 @@ export function MediaToolsPage({
                 ref={playerRef}
                 path={sourceFile.path}
                 kind={isSourceAudio ? "audio" : "video"}
+                onTimeUpdate={(secs) => setPlayerCurrentTime(secs)}
                 className={
                   isSourceAudio
                     ? "w-full"
                     : "aspect-video max-h-[240px] w-full rounded-lg bg-black object-contain"
                 }
               />
+            )}
+
+            {scriptResult && (
+              <div className="rounded-lg border border-slate-800 bg-slate-900 px-3 py-2.5 text-white shadow-inner">
+                <div className="flex items-center justify-between gap-2 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                  <span>Xem trước phụ đề theo Player</span>
+                  <span className="font-mono text-indigo-300">
+                    {formatDuration(playerCurrentTime)}
+                  </span>
+                </div>
+                {activePreviewSegment ? (
+                  <div className="mt-1.5 space-y-0.5 text-center">
+                    <p className="text-xs leading-snug">
+                      <span
+                        className={`font-bold ${
+                          activePreviewSegment.role === "teacher"
+                            ? "text-amber-300"
+                            : "text-emerald-300"
+                        }`}
+                      >
+                        [{activePreviewSegment.speaker_label}]:
+                      </span>{" "}
+                      {activePreviewSegment.text}
+                    </p>
+                    {activePreviewSegment.translation.trim() && (
+                      <p className="text-[11px] italic text-slate-300">
+                        {activePreviewSegment.translation}
+                      </p>
+                    )}
+                    {activePreviewSegment.grammar_note.trim() && (
+                      <p className="text-[11px] text-sky-300">
+                        💡 Sửa: {activePreviewSegment.grammar_note}
+                      </p>
+                    )}
+                  </div>
+                ) : (
+                  <p className="mt-1.5 text-center text-[11px] italic text-slate-400">
+                    Bấm phát hoặc chọn mốc thời gian để xem trước phụ đề chạy theo video...
+                  </p>
+                )}
+              </div>
             )}
           </div>
 
@@ -1212,57 +1458,380 @@ export function MediaToolsPage({
                 </div>
               )}
 
-              {/* Segments Timeline List */}
+              {/* Embed Script into Video Panel */}
+              {!isSourceAudio && sourceFile && (
+                <div className="rounded-xl border border-indigo-200 bg-indigo-50/40 p-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex items-center gap-1.5 text-xs font-bold text-indigo-950">
+                      <Film className="h-4 w-4 text-indigo-600" />
+                      Ghép Script hiện tại vào Video (Xuất MP4 có phụ đề)
+                    </div>
+                    <span className="text-[11px] text-indigo-700">
+                      Dùng trực tiếp nội dung bạn vừa chỉnh sửa bên dưới
+                    </span>
+                  </div>
+                  <div className="mt-2.5 grid gap-2.5 sm:grid-cols-12">
+                    <div className="sm:col-span-5">
+                      <label className="block text-[11px] font-semibold text-slate-700">
+                        Kiểu ghép phụ đề
+                      </label>
+                      <select
+                        value={burnMode}
+                        onChange={(e) =>
+                          setBurnMode(
+                            e.target.value === "softsub" ? "softsub" : "hardsub"
+                          )
+                        }
+                        aria-label="Kiểu ghép phụ đề vào video"
+                        className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-800 focus:border-indigo-400 focus:outline-none"
+                      >
+                        <option value="hardsub">
+                          In cứng lên hình (Hardsub — Mọi thiết bị/Zalo đều hiện &amp; có màu vai trò)
+                        </option>
+                        <option value="softsub">
+                          Phụ đề mềm (Softsub mov_text — Xuất cực nhanh, bật/tắt được)
+                        </option>
+                      </select>
+                    </div>
+                    <div className="sm:col-span-4">
+                      <label className="block text-[11px] font-semibold text-slate-700">
+                        Nội dung hiển thị trên video
+                      </label>
+                      <select
+                        value={subtitleContentMode}
+                        onChange={(e) =>
+                          setSubtitleContentMode(
+                            e.target.value as
+                              | "all"
+                              | "with_grammar"
+                              | "bilingual"
+                              | "text_only"
+                          )
+                        }
+                        aria-label="Nội dung phụ đề trên video"
+                        className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-800 focus:border-indigo-400 focus:outline-none"
+                      >
+                        <option value="all">
+                          Đầy đủ (Lời thoại + Dịch + Gợi ý sửa)
+                        </option>
+                        <option value="with_grammar">
+                          Lời thoại + Gợi ý sửa lỗi
+                        </option>
+                        <option value="bilingual">
+                          Song ngữ (Lời thoại + Dịch Việt)
+                        </option>
+                        <option value="text_only">Chỉ lời thoại gốc</option>
+                      </select>
+                    </div>
+                    <div className="flex items-end sm:col-span-3">
+                      <button
+                        type="button"
+                        onClick={() => void handleEmbedSubtitlesVideo()}
+                        disabled={
+                          taskId !== null ||
+                          !ffmpegAvailable ||
+                          scriptResult.transcript.segments.length === 0
+                        }
+                        className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        <Film className="h-3.5 w-3.5" />
+                        Xuất Video + Script
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {subtitledVideoOutput && (
+                <MediaResultCard
+                  output={subtitledVideoOutput}
+                  actionLabel={
+                    burnMode === "hardsub"
+                      ? "Video Hardsub (In cứng Script)"
+                      : "Video Softsub (Phụ đề mềm)"
+                  }
+                />
+              )}
+
+              {/* Segments Timeline List with Inline Editor */}
               <div className="space-y-2">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="text-xs font-bold text-slate-700">
+                    Lời thoại chi tiết ({scriptResult.transcript.segments.length} câu — bấm biểu tượng bút để sửa từng câu)
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => insertSegmentAfter(null)}
+                    className="inline-flex items-center gap-1 rounded-lg border border-indigo-200 bg-indigo-50 px-2.5 py-1 text-[11px] font-semibold text-indigo-700 hover:bg-indigo-100"
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                    Thêm câu thoại
+                  </button>
+                </div>
+
                 {filteredSegments.length === 0 ? (
                   <p className="rounded-lg bg-slate-50 py-6 text-center text-xs text-slate-500">
                     Không có đoạn hội thoại nào khớp với bộ lọc hiện tại.
                   </p>
                 ) : (
-                  filteredSegments.map((seg, idx) => {
+                  filteredSegments.map(({ seg, originalIdx }) => {
                     const roleInfo = roleBadgeStyle(seg.role);
                     const timeLabel = seg.end_time.trim()
                       ? `${seg.start_time.trim()} – ${seg.end_time.trim()}`
                       : seg.start_time.trim();
+                    const isEditing = editingSegIdx === originalIdx;
+                    const isPlayingNow = activeSegmentIdx === originalIdx;
+
                     return (
                       <div
-                        key={`${seg.speaker_id}-${seg.start_time}-${idx}`}
-                        className="rounded-xl border border-slate-200 bg-slate-50/50 p-3 transition hover:border-indigo-200 hover:bg-white"
+                        key={`seg-${originalIdx}`}
+                        className={`rounded-xl border p-3 transition ${
+                          isPlayingNow
+                            ? "border-indigo-500 bg-indigo-50/40 ring-2 ring-indigo-200"
+                            : isEditing
+                            ? "border-indigo-300 bg-white shadow-xs"
+                            : "border-slate-200 bg-slate-50/50 hover:border-indigo-200 hover:bg-white"
+                        }`}
                       >
-                        <div className="flex flex-wrap items-center gap-2">
-                          <button
-                            type="button"
-                            onClick={() => seekPlayerTo(seg.start_time)}
-                            title={`Tua player cột trái tới ${seg.start_time} và phát`}
-                            className="inline-flex items-center gap-1 rounded-md border border-indigo-200 bg-indigo-50 px-2 py-0.5 font-mono text-[11px] font-semibold text-indigo-700 hover:bg-indigo-100"
-                          >
-                            <Play className="h-2.5 w-2.5 fill-current" />
-                            {timeLabel}
-                          </button>
-                          <span
-                            className={`rounded-full border px-2 py-0.5 text-[10px] font-bold ${roleInfo.badgeClass}`}
-                          >
-                            {roleInfo.label}
-                          </span>
-                          <span className="text-xs font-bold text-slate-900">
-                            {seg.speaker_label}
-                          </span>
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => seekPlayerTo(seg.start_time)}
+                              title={`Tua player cột trái tới ${seg.start_time} và phát`}
+                              className="inline-flex items-center gap-1 rounded-md border border-indigo-200 bg-indigo-50 px-2 py-0.5 font-mono text-[11px] font-semibold text-indigo-700 hover:bg-indigo-100"
+                            >
+                              <Play className="h-2.5 w-2.5 fill-current" />
+                              {timeLabel}
+                            </button>
+                            <span
+                              className={`rounded-full border px-2 py-0.5 text-[10px] font-bold ${roleInfo.badgeClass}`}
+                            >
+                              {roleInfo.label}
+                            </span>
+                            <span className="text-xs font-bold text-slate-900">
+                              {seg.speaker_label}
+                            </span>
+                            {isPlayingNow && (
+                              <span className="rounded bg-indigo-600 px-1.5 py-0.5 text-[10px] font-bold text-white">
+                                Đang phát
+                              </span>
+                            )}
+                          </div>
+
+                          <div className="flex items-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setEditingSegIdx(isEditing ? null : originalIdx)
+                              }
+                              className={`inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-[11px] font-semibold ${
+                                isEditing
+                                  ? "border-indigo-500 bg-indigo-600 text-white"
+                                  : "border-slate-200 bg-white text-slate-600 hover:bg-slate-100"
+                              }`}
+                              title={
+                                isEditing
+                                  ? "Đóng trình sửa câu này"
+                                  : "Sửa lời thoại, thời gian hoặc người nói"
+                              }
+                            >
+                              {isEditing ? (
+                                <>
+                                  <Check className="h-3 w-3" />
+                                  Xong
+                                </>
+                              ) : (
+                                <>
+                                  <Pencil className="h-3 w-3" />
+                                  Sửa
+                                </>
+                              )}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => insertSegmentAfter(originalIdx)}
+                              className="rounded-md border border-slate-200 bg-white p-1 text-slate-500 hover:bg-indigo-50 hover:text-indigo-700"
+                              title="Chèn thêm câu thoại ngay dưới dòng này"
+                            >
+                              <Plus className="h-3 w-3" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => deleteSegmentAt(originalIdx)}
+                              className="rounded-md border border-slate-200 bg-white p-1 text-slate-500 hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600"
+                              title="Xóa dòng thoại này"
+                            >
+                              <Trash2 className="h-3 w-3" />
+                            </button>
+                          </div>
                         </div>
 
-                        <p className="mt-1.5 text-sm leading-relaxed text-slate-800">
-                          {seg.text}
-                        </p>
+                        {isEditing ? (
+                          <div className="mt-2.5 space-y-2 border-t border-slate-100 pt-2.5">
+                            <div className="grid gap-2 sm:grid-cols-12">
+                              <div className="sm:col-span-4">
+                                <label className="block text-[10px] font-semibold text-slate-600">
+                                  Chọn người nói
+                                </label>
+                                <select
+                                  value={
+                                    scriptResult.transcript.speakers.some(
+                                      (s) => s.id === seg.speaker_id
+                                    )
+                                      ? seg.speaker_id
+                                      : ""
+                                  }
+                                  onChange={(e) => {
+                                    if (e.target.value) {
+                                      assignSegmentSpeaker(
+                                        originalIdx,
+                                        e.target.value
+                                      );
+                                    }
+                                  }}
+                                  className="mt-0.5 w-full rounded-md border border-slate-200 bg-white px-2 py-1 text-xs focus:border-indigo-400 focus:outline-none"
+                                >
+                                  <option value="" disabled>
+                                    -- Chọn người nói --
+                                  </option>
+                                  {scriptResult.transcript.speakers.map((sp) => (
+                                    <option key={sp.id} value={sp.id}>
+                                      {sp.label} ({roleBadgeStyle(sp.role).label})
+                                    </option>
+                                  ))}
+                                </select>
+                              </div>
 
-                        {seg.translation.trim() && (
-                          <p className="mt-1 text-xs italic text-slate-600">
-                            Dịch: {seg.translation}
-                          </p>
-                        )}
+                              <div className="sm:col-span-4">
+                                <div className="flex items-center justify-between">
+                                  <label className="text-[10px] font-semibold text-slate-600">
+                                    Bắt đầu
+                                  </label>
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      captureSegmentTime(originalIdx, "start_time")
+                                    }
+                                    className="text-[10px] font-semibold text-indigo-600 hover:underline"
+                                  >
+                                    Lấy giờ Player
+                                  </button>
+                                </div>
+                                <input
+                                  type="text"
+                                  value={seg.start_time}
+                                  onChange={(e) =>
+                                    updateSegmentAt(originalIdx, {
+                                      start_time: e.target.value,
+                                    })
+                                  }
+                                  className="mt-0.5 w-full rounded-md border border-slate-200 px-2 py-1 font-mono text-xs focus:border-indigo-400 focus:outline-none"
+                                />
+                              </div>
 
-                        {seg.grammar_note.trim() && (
-                          <div className="mt-1.5 rounded-lg border border-amber-200 bg-amber-50/70 px-2.5 py-1.5 text-xs text-amber-900">
-                            💡 <strong>Gợi ý sửa:</strong> {seg.grammar_note}
+                              <div className="sm:col-span-4">
+                                <div className="flex items-center justify-between">
+                                  <label className="text-[10px] font-semibold text-slate-600">
+                                    Kết thúc
+                                  </label>
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      captureSegmentTime(originalIdx, "end_time")
+                                    }
+                                    className="text-[10px] font-semibold text-indigo-600 hover:underline"
+                                  >
+                                    Lấy giờ Player
+                                  </button>
+                                </div>
+                                <input
+                                  type="text"
+                                  value={seg.end_time}
+                                  onChange={(e) =>
+                                    updateSegmentAt(originalIdx, {
+                                      end_time: e.target.value,
+                                    })
+                                  }
+                                  className="mt-0.5 w-full rounded-md border border-slate-200 px-2 py-1 font-mono text-xs focus:border-indigo-400 focus:outline-none"
+                                />
+                              </div>
+                            </div>
+
+                            <div>
+                              <label className="block text-[10px] font-semibold text-slate-600">
+                                Nội dung lời nói
+                              </label>
+                              <textarea
+                                rows={2}
+                                value={seg.text}
+                                onChange={(e) =>
+                                  updateSegmentAt(originalIdx, {
+                                    text: e.target.value,
+                                  })
+                                }
+                                placeholder="Nhập lời nói chuẩn..."
+                                className="mt-0.5 w-full rounded-md border border-slate-200 px-2.5 py-1.5 text-sm focus:border-indigo-400 focus:outline-none"
+                              />
+                            </div>
+
+                            <div className="grid gap-2 sm:grid-cols-2">
+                              <div>
+                                <label className="block text-[10px] font-semibold text-slate-600">
+                                  Bản dịch tiếng Việt (tùy chọn)
+                                </label>
+                                <input
+                                  type="text"
+                                  value={seg.translation}
+                                  onChange={(e) =>
+                                    updateSegmentAt(originalIdx, {
+                                      translation: e.target.value,
+                                    })
+                                  }
+                                  placeholder="Dịch nghĩa..."
+                                  className="mt-0.5 w-full rounded-md border border-slate-200 px-2 py-1 text-xs focus:border-indigo-400 focus:outline-none"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-[10px] font-semibold text-slate-600">
+                                  Gợi ý sửa lỗi / Nhận xét (tùy chọn)
+                                </label>
+                                <input
+                                  type="text"
+                                  value={seg.grammar_note}
+                                  onChange={(e) =>
+                                    updateSegmentAt(originalIdx, {
+                                      grammar_note: e.target.value,
+                                    })
+                                  }
+                                  placeholder="VD: Nên dùng 'went' thay vì 'go'..."
+                                  className="mt-0.5 w-full rounded-md border border-slate-200 px-2 py-1 text-xs focus:border-indigo-400 focus:outline-none"
+                                />
+                              </div>
+                            </div>
                           </div>
+                        ) : (
+                          <>
+                            <p className="mt-1.5 text-sm leading-relaxed text-slate-800">
+                              {seg.text || (
+                                <span className="italic text-slate-400">
+                                  (Chưa có lời thoại — bấm Sửa để nhập)
+                                </span>
+                              )}
+                            </p>
+
+                            {seg.translation.trim() && (
+                              <p className="mt-1 text-xs italic text-slate-600">
+                                Dịch: {seg.translation}
+                              </p>
+                            )}
+
+                            {seg.grammar_note.trim() && (
+                              <div className="mt-1.5 rounded-lg border border-amber-200 bg-amber-50/70 px-2.5 py-1.5 text-xs text-amber-900">
+                                💡 <strong>Gợi ý sửa:</strong> {seg.grammar_note}
+                              </div>
+                            )}
+                          </>
                         )}
                       </div>
                     );

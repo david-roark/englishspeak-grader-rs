@@ -6,9 +6,10 @@ use grader_core::gemini::{
     GeminiClient, MediaResolution, TranscribeOptions, UploadCache, UploadedFile, FALLBACK_MODELS,
 };
 use grader_core::media::{
-    build_compress_video_args, build_extract_mp3_args, build_extract_speech_mp3_args_to,
-    build_mute_video_args_to, build_trim_media_args_to, compress_video, extract_mp3,
-    parse_duration_from_stderr, resolve_ffmpeg, DEFAULT_MP3_PRESET, DEFAULT_VIDEO_PRESET,
+    build_compress_video_args, build_embed_subtitles_video_args_to, build_extract_mp3_args,
+    build_extract_speech_mp3_args_to, build_mute_video_args_to, build_trim_media_args_to,
+    compress_video, escape_ffmpeg_filter_path, extract_mp3, parse_duration_from_stderr,
+    resolve_ffmpeg, DEFAULT_MP3_PRESET, DEFAULT_VIDEO_PRESET,
 };
 use grader_core::prompts::PromptProfile;
 use grader_core::rubrics::{get_builtin_rubric, AssignmentImage, Rubric};
@@ -620,4 +621,60 @@ async fn test_transcribe_audio_with_wiremock_and_normalize() {
     assert_eq!(result.speakers[1].role, "student");
     assert_eq!(result.segments.len(), 2);
     assert_eq!(result.segments[1].grammar_note, "Sửa: 'I like music'.");
+}
+
+#[test]
+fn test_embed_subtitles_video_args_and_filter_escape() {
+    let escaped = escape_ffmpeg_filter_path(Path::new(r"C:\sub\test[1]:2.ass"));
+    assert_eq!(escaped, r"C\:/sub/test\[1\]\:2.ass");
+
+    let burn_args = build_embed_subtitles_video_args_to(
+        Path::new("/tmp/in.mp4"),
+        Path::new("/tmp/sub/demo.ass"),
+        true,
+        Path::new("/tmp/out_hard.mp4"),
+    );
+    assert!(burn_args
+        .windows(2)
+        .any(|w| w[0] == "-vf" && w[1] == "ass=/tmp/sub/demo.ass"));
+    assert!(burn_args.iter().any(|a| a == "libx264"));
+    assert!(burn_args.iter().any(|a| a == "aac"));
+    assert!(!burn_args.iter().any(|a| a == "mov_text"));
+    assert_eq!(
+        burn_args.last().map(String::as_str),
+        Some("/tmp/out_hard.mp4")
+    );
+
+    let soft_mp4_args = build_embed_subtitles_video_args_to(
+        Path::new("/tmp/in.mp4"),
+        Path::new("/tmp/sub/demo.srt"),
+        false,
+        Path::new("/tmp/out_soft.mp4"),
+    );
+    assert!(soft_mp4_args
+        .windows(2)
+        .any(|w| w[0] == "-c:v" && w[1] == "copy"));
+    assert!(soft_mp4_args
+        .windows(2)
+        .any(|w| w[0] == "-c:s" && w[1] == "mov_text"));
+    assert!(!soft_mp4_args.iter().any(|a| a == "libx264"));
+    assert_eq!(
+        soft_mp4_args.last().map(String::as_str),
+        Some("/tmp/out_soft.mp4")
+    );
+
+    let soft_webm_args = build_embed_subtitles_video_args_to(
+        Path::new("/tmp/in.webm"),
+        Path::new("/tmp/sub/demo.srt"),
+        false,
+        Path::new("/tmp/out_webm_soft.mp4"),
+    );
+    assert!(soft_webm_args.iter().any(|a| a == "libx264"));
+    assert!(soft_webm_args
+        .windows(2)
+        .any(|w| w[0] == "-c:s" && w[1] == "mov_text"));
+    assert_eq!(
+        soft_webm_args.last().map(String::as_str),
+        Some("/tmp/out_webm_soft.mp4")
+    );
 }

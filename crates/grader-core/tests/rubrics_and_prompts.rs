@@ -10,9 +10,10 @@ use grader_core::rubrics::{
     AssignmentImage, Criterion, CriterionLevel, Rubric,
 };
 use grader_core::schemas::{
-    assessment_result_gemini_schema, format_transcript_markdown, format_transcript_srt,
-    format_transcript_text, transcript_result_gemini_schema, AssessmentResult, CriterionScore,
-    Evidence, StudentAssessment, TranscriptResult, TranscriptSegment, TranscriptSpeaker,
+    assessment_result_gemini_schema, format_transcript_ass, format_transcript_markdown,
+    format_transcript_srt, format_transcript_srt_with_mode, format_transcript_text,
+    transcript_result_gemini_schema, AssessmentResult, CriterionScore, Evidence, StudentAssessment,
+    TranscriptResult, TranscriptSegment, TranscriptSpeaker,
 };
 
 fn sample_result() -> AssessmentResult {
@@ -482,4 +483,85 @@ fn test_build_transcription_prompt_options() {
     assert!(usr.contains("Ghi rõ các từ phát âm sai."));
     assert!(usr.contains("Điền bản dịch tiếng Việt ngắn gọn"));
     assert!(usr.contains("Để trống trường `grammar_note`"));
+}
+
+#[test]
+fn test_format_transcript_ass_and_srt_modes() {
+    let sample = TranscriptResult {
+        summary: "Hội thoại mẫu".into(),
+        detected_language: "English".into(),
+        speakers: vec![
+            TranscriptSpeaker {
+                id: "T1".into(),
+                label: "Cô Lan".into(),
+                role: "teacher".into(),
+                name_confident: true,
+            },
+            TranscriptSpeaker {
+                id: "S1".into(),
+                label: "Minh".into(),
+                role: "student".into(),
+                name_confident: true,
+            },
+        ],
+        segments: vec![
+            TranscriptSegment {
+                start_time: "00:02".into(),
+                end_time: "00:06".into(),
+                speaker_id: "T1".into(),
+                speaker_label: "Cô Lan".into(),
+                role: "teacher".into(),
+                text: "Hello Minh, read {braced} carefully.".into(),
+                translation: "Chào Minh, đọc kỹ nhé.".into(),
+                grammar_note: "".into(),
+            },
+            TranscriptSegment {
+                start_time: "00:07".into(),
+                end_time: "00:11".into(),
+                speaker_id: "S1".into(),
+                speaker_label: "Minh".into(),
+                role: "student".into(),
+                text: "I like read books.".into(),
+                translation: "Em thích đọc sách.".into(),
+                grammar_note: "Dùng 'reading books'.".into(),
+            },
+        ],
+    };
+
+    let srt_text_only = format_transcript_srt_with_mode(&sample, "text_only");
+    assert!(srt_text_only.contains("[Cô Lan]: Hello Minh"));
+    assert!(!srt_text_only.contains("Chào Minh, đọc kỹ nhé."));
+    assert!(!srt_text_only.contains("reading books"));
+
+    let srt_bilingual = format_transcript_srt_with_mode(&sample, "bilingual");
+    assert!(srt_bilingual.contains("Chào Minh, đọc kỹ nhé."));
+    assert!(srt_bilingual.contains("Em thích đọc sách."));
+    assert!(!srt_bilingual.contains("reading books"));
+
+    let srt_grammar = format_transcript_srt_with_mode(&sample, "with_grammar");
+    assert!(!srt_grammar.contains("Chào Minh, đọc kỹ nhé."));
+    assert!(srt_grammar.contains("Dùng 'reading books'."));
+
+    let srt_all = format_transcript_srt_with_mode(&sample, "all");
+    assert!(srt_all.contains("Chào Minh, đọc kỹ nhé."));
+    assert!(srt_all.contains("Dùng 'reading books'."));
+
+    let ass_all = format_transcript_ass(&sample, "all");
+    assert!(ass_all.contains("[Script Info]"));
+    assert!(ass_all.contains("[V4+ Styles]"));
+    assert!(ass_all.contains("[Events]"));
+    assert!(ass_all.contains(r"{\b1\c&H00D4FF&}[Giáo viên - Cô Lan]:"));
+    assert!(ass_all.contains(r"{\b1\c&H80FF80&}[Minh]:"));
+    assert!(!ass_all.contains("{braced}"));
+    assert!(ass_all.contains("braced"));
+    assert!(ass_all.contains(r"\N{\fs23\c&HE8E8E8&}Dịch: Chào Minh, đọc kỹ nhé."));
+    assert!(ass_all.contains(r"\N{\fs23\c&H80D8FF&}Sửa: Dùng 'reading books'."));
+
+    let ass_text_only = format_transcript_ass(&sample, "text_only");
+    assert!(!ass_text_only.contains("Dịch:"));
+    assert!(!ass_text_only.contains("Sửa:"));
+
+    let ass_grammar = format_transcript_ass(&sample, "with_grammar");
+    assert!(!ass_grammar.contains("Dịch:"));
+    assert!(ass_grammar.contains(r"\N{\fs23\c&H80D8FF&}Sửa: Dùng 'reading books'."));
 }

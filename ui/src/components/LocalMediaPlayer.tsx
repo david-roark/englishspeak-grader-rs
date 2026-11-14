@@ -6,6 +6,7 @@ interface LocalMediaPlayerProps {
   path: string;
   kind: "audio" | "video";
   className?: string;
+  onTimeUpdate?: (currentTimeSecs: number) => void;
 }
 
 function assignMediaRef(
@@ -38,7 +39,7 @@ function describeMediaError(err: MediaError | null): string {
 export const LocalMediaPlayer = forwardRef<
   HTMLMediaElement,
   LocalMediaPlayerProps
->(function LocalMediaPlayer({ path, kind, className }, ref) {
+>(function LocalMediaPlayer({ path, kind, className, onTimeUpdate }, ref) {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
 
@@ -59,6 +60,8 @@ export const LocalMediaPlayer = forwardRef<
           controls
           preload="metadata"
           onLoadedMetadata={() => setErrorMsg(null)}
+          onTimeUpdate={(e) => onTimeUpdate?.(e.currentTarget.currentTime)}
+          onSeeked={(e) => onTimeUpdate?.(e.currentTarget.currentTime)}
           onError={(e) => setErrorMsg(describeMediaError(e.currentTarget.error))}
           className={className ?? "w-full"}
         />
@@ -70,6 +73,8 @@ export const LocalMediaPlayer = forwardRef<
           controls
           preload="metadata"
           onLoadedMetadata={() => setErrorMsg(null)}
+          onTimeUpdate={(e) => onTimeUpdate?.(e.currentTarget.currentTime)}
+          onSeeked={(e) => onTimeUpdate?.(e.currentTarget.currentTime)}
           onError={(e) => setErrorMsg(describeMediaError(e.currentTarget.error))}
           className={
             className ??
