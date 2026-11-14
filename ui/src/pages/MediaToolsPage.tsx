@@ -1,28 +1,20 @@
 import { useMemo, useRef, useState } from "react";
 import {
-  Check,
   Clock,
-  Copy,
-  Download,
   ExternalLink,
   FileText,
-  Film,
   FolderOpen,
   Minimize2,
   Music,
-  Pencil,
-  Play,
-  Plus,
   Scissors,
-  Search,
   Sparkles,
-  Trash2,
-  Users,
   VolumeX,
 } from "lucide-react";
+import { LiveSubtitlePreview } from "../components/LiveSubtitlePreview";
 import { LocalMediaPlayer } from "../components/LocalMediaPlayer";
 import { MediaDropZone } from "../components/MediaDropZone";
 import { MediaResultCard } from "../components/MediaResultCard";
+import { MediaScriptResultPanel } from "../components/MediaScriptResultPanel";
 import { OutputLocationPicker } from "../components/OutputLocationPicker";
 import {
   loadSavedOutputTarget,
@@ -41,12 +33,17 @@ import {
   isAudioFilePath,
   parseTimecodeToSeconds,
 } from "../lib/mediaUtils";
+import {
+  INTERACTION_MODE_OPTIONS,
+  VERBATIM_MODE_OPTIONS,
+  buildMarkdownScript,
+  type SubtitleFontName,
+} from "../lib/scriptUtils";
 import type {
   FileInfo,
   GenerateScriptResponse,
   MediaOutput,
   Mp3Preset,
-  TranscriptResult,
   TranscriptSegment,
   VideoPreset,
 } from "../lib/types";
@@ -67,101 +64,6 @@ interface SessionHistoryItem {
   id: string;
   toolLabel: string;
   output: MediaOutput;
-}
-
-const INTERACTION_MODE_OPTIONS = [
-  { value: "auto", label: "Tự nhận diện từ âm thanh" },
-  { value: "interview", label: "Hỏi – Đáp (Giáo viên & Học sinh)" },
-  { value: "monologue", label: "Thuyết trình / Độc thoại (1 Học sinh)" },
-  { value: "pair", label: "Hội thoại theo cặp (2 Học sinh)" },
-  { value: "group", label: "Thảo luận nhóm (3+ người)" },
-];
-
-const VERBATIM_MODE_OPTIONS = [
-  {
-    value: "verbatim",
-    label: "Nguyên trạng — Giữ cả lỗi ngữ pháp/ngập ngừng của HS",
-  },
-  {
-    value: "clean",
-    label: "Làm sạch — Lược bỏ từ đệm (um, uh) cho dễ đọc",
-  },
-];
-
-function roleBadgeStyle(role: string): { label: string; badgeClass: string } {
-  switch (role) {
-    case "teacher":
-      return {
-        label: "Giáo viên",
-        badgeClass: "bg-indigo-100 text-indigo-800 border-indigo-200",
-      };
-    case "student":
-      return {
-        label: "Học sinh",
-        badgeClass: "bg-emerald-100 text-emerald-800 border-emerald-200",
-      };
-    default:
-      return {
-        label: "Khác",
-        badgeClass: "bg-slate-100 text-slate-700 border-slate-200",
-      };
-  }
-}
-
-function formatPreviewSpeakerPrefix(
-  seg: TranscriptSegment,
-  showSpeaker: boolean,
-  showRole: boolean
-): string | null {
-  if (!showSpeaker && !showRole) return null;
-  const roleKey = seg.role.trim().toLowerCase();
-  const roleVi = roleBadgeStyle(roleKey).label;
-  const label = seg.speaker_label.trim() || roleVi;
-  if (showSpeaker && showRole) {
-    if (roleKey === "teacher") {
-      const labelLower = label.toLowerCase();
-      const roleLower = roleVi.toLowerCase();
-      return labelLower === roleLower || labelLower.startsWith(roleLower)
-        ? label
-        : `${roleVi} - ${label}`;
-    }
-    return label;
-  }
-  return showSpeaker ? label : roleVi;
-}
-
-function buildMarkdownScript(result: TranscriptResult, sourceName: string): string {
-  const lines: string[] = [
-    `# Script bài nói: ${sourceName}`,
-    "",
-    `- **Ngôn ngữ chính:** ${result.detected_language}`,
-  ];
-  if (result.summary.trim()) {
-    lines.push(`- **Tóm tắt bối cảnh:** ${result.summary.trim()}`);
-  }
-  if (result.speakers.length > 0) {
-    const spList = result.speakers
-      .map((s) => `${s.label} (${roleBadgeStyle(s.role).label})`)
-      .join(", ");
-    lines.push(`- **Người tham gia:** ${spList}`);
-  }
-  lines.push("", "## Nội dung chi tiết", "");
-  for (const seg of result.segments) {
-    const range = seg.end_time.trim()
-      ? `${seg.start_time.trim()} - ${seg.end_time.trim()}`
-      : seg.start_time.trim();
-    const roleLabel = roleBadgeStyle(seg.role).label;
-    lines.push(
-      `- **[${range}] [${roleLabel}] ${seg.speaker_label}:** ${seg.text.trim()}`
-    );
-    if (seg.translation.trim()) {
-      lines.push(`  - *Dịch:* ${seg.translation.trim()}`);
-    }
-    if (seg.grammar_note.trim()) {
-      lines.push(`  - *Gợi ý sửa:* ${seg.grammar_note.trim()}`);
-    }
-  }
-  return `${lines.join("\n")}\n`;
 }
 
 const TOOL_TABS: {
@@ -267,9 +169,8 @@ export function MediaToolsPage({
   const [showSubText, setShowSubText] = useState(true);
   const [showSubTranslation, setShowSubTranslation] = useState(true);
   const [showSubGrammar, setShowSubGrammar] = useState(true);
-  const [subtitleFont, setSubtitleFont] = useState<
-    "Be Vietnam Pro" | "Noto Sans" | "Lexend"
-  >("Be Vietnam Pro");
+  const [subtitleFont, setSubtitleFont] =
+    useState<SubtitleFontName>("Be Vietnam Pro");
   const [subtitledVideoOutput, setSubtitledVideoOutput] =
     useState<MediaOutput | null>(null);
   const [sessionHistory, setSessionHistory] = useState<SessionHistoryItem[]>([]);
@@ -931,90 +832,16 @@ export function MediaToolsPage({
             )}
 
             {scriptResult && (
-              <div className="space-y-2 rounded-xl border border-indigo-200 bg-indigo-50/40 p-3">
-                <div className="flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-1.5 text-[11px] font-bold text-indigo-950">
-                    <span>Xem trước phụ đề</span>
-                    <span className="rounded-full border border-indigo-200 bg-white px-2 py-0.5 text-[10px] font-semibold text-indigo-700">
-                      {subtitleFont}
-                    </span>
-                  </div>
-                  <span className="rounded-md bg-indigo-100/80 px-2 py-0.5 font-mono text-[11px] font-semibold text-indigo-700">
-                    {formatDuration(playerCurrentTime)}
-                  </span>
-                </div>
-                <div
-                  className="rounded-lg border border-indigo-200/80 bg-white px-3 py-2.5 text-slate-900 shadow-xs"
-                  style={{
-                    fontFamily: `"${subtitleFont}", "Noto Emoji", sans-serif`,
-                  }}
-                >
-                  {activePreviewSegment ? (
-                    (() => {
-                      const prefix = formatPreviewSpeakerPrefix(
-                        activePreviewSegment,
-                        showSubSpeaker,
-                        showSubRole
-                      );
-                      const hasText =
-                        showSubText &&
-                        activePreviewSegment.text.trim().length > 0;
-                      const hasTrans =
-                        showSubTranslation &&
-                        activePreviewSegment.translation.trim().length > 0;
-                      const hasGram =
-                        showSubGrammar &&
-                        activePreviewSegment.grammar_note.trim().length > 0;
-                      if (!hasText && !hasTrans && !hasGram) {
-                        return (
-                          <p className="text-center text-[11px] italic text-slate-500">
-                            Các thành phần phụ đề của đoạn này đang được tắt hiển thị.
-                          </p>
-                        );
-                      }
-                      const prefixSpan = prefix ? (
-                        <>
-                          <span
-                            className={`font-bold ${
-                              activePreviewSegment.role === "teacher"
-                                ? "text-amber-700"
-                                : "text-emerald-700"
-                            }`}
-                          >
-                            [{prefix}]:
-                          </span>{" "}
-                        </>
-                      ) : null;
-                      return (
-                        <div className="space-y-0.5 text-center">
-                          {hasText && (
-                            <p className="text-xs leading-snug text-slate-900">
-                              {prefixSpan}
-                              {activePreviewSegment.text}
-                            </p>
-                          )}
-                          {hasTrans && (
-                            <p className="text-[11px] italic text-slate-600">
-                              {!hasText && prefixSpan}
-                              {activePreviewSegment.translation}
-                            </p>
-                          )}
-                          {hasGram && (
-                            <p className="text-[11px] text-indigo-700">
-                              {!hasText && !hasTrans && prefixSpan}
-                              💡 Sửa: {activePreviewSegment.grammar_note}
-                            </p>
-                          )}
-                        </div>
-                      );
-                    })()
-                  ) : (
-                    <p className="text-center text-[11px] italic text-slate-500">
-                      Bấm phát hoặc chọn mốc thời gian để xem trước phụ đề chạy theo video...
-                    </p>
-                  )}
-                </div>
-              </div>
+              <LiveSubtitlePreview
+                activePreviewSegment={activePreviewSegment}
+                playerCurrentTime={playerCurrentTime}
+                subtitleFont={subtitleFont}
+                showSubRole={showSubRole}
+                showSubSpeaker={showSubSpeaker}
+                showSubText={showSubText}
+                showSubTranslation={showSubTranslation}
+                showSubGrammar={showSubGrammar}
+              />
             )}
           </div>
 
@@ -1378,749 +1205,48 @@ export function MediaToolsPage({
           )}
 
           {scriptResult && (
-            <div className="space-y-3 rounded-xl border border-indigo-200 bg-white p-4 shadow-xs">
-              {/* Saved files banner */}
-              <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-100 pb-3">
-                <div className="min-w-0 flex-1 space-y-1">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-sm font-bold text-emerald-800">
-                      ✅ Đã tạo Script: {scriptResult.script_output.file_name}
-                    </span>
-                    <span className="rounded-full bg-indigo-50 px-2 py-0.5 text-[11px] font-semibold text-indigo-700">
-                      {scriptResult.transcript.detected_language}
-                    </span>
-                    {scriptResult.reused_upload_cache && (
-                      <span className="rounded-full bg-sky-50 px-2 py-0.5 text-[11px] font-medium text-sky-700">
-                        Dùng lại audio đã upload
-                      </span>
-                    )}
-                  </div>
-                  {scriptResult.transcript.summary && (
-                    <p className="text-xs text-slate-600">
-                      {scriptResult.transcript.summary}
-                    </p>
-                  )}
-                  <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-slate-500">
-                    <span>
-                      Script:{" "}
-                      <strong className="text-slate-700">
-                        {scriptResult.script_output.output_path}
-                      </strong>
-                    </span>
-                    {scriptResult.mp3_output && (
-                      <span>
-                        MP3:{" "}
-                        <strong className="text-slate-700">
-                          {scriptResult.mp3_output.file_name}
-                        </strong>{" "}
-                        ({scriptResult.mp3_output.size_mb.toFixed(2)} MB)
-                      </span>
-                    )}
-                  </div>
-                </div>
-
-                <div className="flex flex-wrap items-center gap-1.5">
-                  <button
-                    type="button"
-                    onClick={() =>
-                      api.openLocalFile(scriptResult.script_output.output_path)
-                    }
-                    className="inline-flex items-center gap-1 rounded-lg bg-indigo-600 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-indigo-700"
-                  >
-                    <ExternalLink className="h-3.5 w-3.5" />
-                    Mở Script
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      api.revealInFolder(scriptResult.script_output.output_path)
-                    }
-                    className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
-                  >
-                    <FolderOpen className="h-3.5 w-3.5" />
-                    Thư mục
-                  </button>
-                  {scriptResult.mp3_output && (
-                    <button
-                      type="button"
-                      onClick={() =>
-                        api.openLocalFile(scriptResult.mp3_output!.output_path)
-                      }
-                      className="inline-flex items-center gap-1 rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-1.5 text-xs font-semibold text-emerald-700 hover:bg-emerald-100"
-                    >
-                      <Music className="h-3.5 w-3.5" />
-                      Mở MP3
-                    </button>
-                  )}
-                </div>
-              </div>
-
-              {/* Action toolbar & search */}
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="flex flex-wrap items-center gap-1.5">
-                  <button
-                    type="button"
-                    onClick={() => void handleCopyScriptMarkdown()}
-                    className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
-                  >
-                    {copiedMd ? (
-                      <>
-                        <Check className="h-3.5 w-3.5 text-emerald-600" />
-                        Đã chép Markdown
-                      </>
-                    ) : (
-                      <>
-                        <Copy className="h-3.5 w-3.5" />
-                        Sao chép Markdown
-                      </>
-                    )}
-                  </button>
-                  <button
-                    type="button"
-                    disabled={exportBusy}
-                    onClick={() => void handleSaveUpdatedMarkdown()}
-                    className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-semibold transition disabled:opacity-50 ${
-                      scriptDirty
-                        ? "border-amber-500 bg-amber-500 text-white shadow-sm ring-2 ring-amber-200 hover:bg-amber-600"
-                        : "border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100"
-                    }`}
-                    title="Ghi đè lại file đã lưu sau khi chỉnh sửa script"
-                  >
-                    <Download className="h-3.5 w-3.5" />
-                    {scriptDirty ? "Lưu thay đổi vào file" : "Lưu cập nhật file"}
-                    {scriptDirty && (
-                      <span className="rounded bg-white/25 px-1.5 py-0.5 text-[10px] font-bold">
-                        Chưa lưu
-                      </span>
-                    )}
-                  </button>
-                  <button
-                    type="button"
-                    disabled={exportBusy}
-                    onClick={() => void handleExportScriptAs("srt")}
-                    className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-                  >
-                    Xuất phụ đề .srt
-                  </button>
-                  <button
-                    type="button"
-                    disabled={exportBusy}
-                    onClick={() => void handleExportScriptAs("txt")}
-                    className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-                  >
-                    Xuất .txt
-                  </button>
-                </div>
-
-                <div className="relative min-w-[200px] flex-1 sm:max-w-xs">
-                  <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
-                  <input
-                    type="text"
-                    value={scriptSearch}
-                    onChange={(e) => setScriptSearch(e.target.value)}
-                    placeholder="Tìm trong lời thoại..."
-                    className="w-full rounded-lg border border-slate-200 py-1.5 pl-8 pr-2.5 text-xs focus:border-indigo-400 focus:outline-none"
-                  />
-                </div>
-              </div>
-
-              {exportNotice && (
-                <div className="rounded-lg bg-emerald-50 px-3 py-1.5 text-xs font-medium text-emerald-800">
-                  ✅ {exportNotice}
-                </div>
-              )}
-
-              {/* Quick Speaker Rename & Role Editor */}
-              {scriptResult.transcript.speakers.length > 0 && (
-                <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-3">
-                  <div className="flex items-center gap-1.5 text-xs font-bold text-slate-700">
-                    <Users className="h-3.5 w-3.5 text-indigo-600" />
-                    Người nói được nhận diện (sửa tên/vai trò để cập nhật cả script):
-                  </div>
-                  <div className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                    {scriptResult.transcript.speakers.map((sp) => (
-                      <div
-                        key={sp.id}
-                        className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white p-1.5"
-                      >
-                        <SelectField
-                          size="xs"
-                          value={sp.role}
-                          onChange={(val) =>
-                            handleSpeakerChange(sp.id, sp.label, val)
-                          }
-                          ariaLabel={`Vai trò của ${sp.label}`}
-                          className="w-28 shrink-0"
-                          options={[
-                            { value: "teacher", label: "Giáo viên" },
-                            { value: "student", label: "Học sinh" },
-                            { value: "other", label: "Khác" },
-                          ]}
-                        />
-                        <input
-                          type="text"
-                          value={sp.label}
-                          onChange={(e) =>
-                            handleSpeakerChange(sp.id, e.target.value, sp.role)
-                          }
-                          aria-label={`Tên hiển thị của ${sp.id}`}
-                          className="min-w-0 flex-1 rounded border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-800 focus:border-indigo-400 focus:outline-none"
-                        />
-                        {!sp.name_confident && (
-                          <span
-                            className="shrink-0 rounded bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-700"
-                            title="AI đặt nhãn tạm vì chưa nghe rõ tên thật"
-                          >
-                            Tạm
-                          </span>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Embed Script into Video Panel */}
-              {!isSourceAudio && sourceFile && (
-                <div className="rounded-xl border border-indigo-200 bg-indigo-50/40 p-3">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div className="flex items-center gap-1.5 text-xs font-bold text-indigo-950">
-                      <Film className="h-4 w-4 text-indigo-600" />
-                      Ghép Script hiện tại vào Video (Xuất MP4 có phụ đề)
-                    </div>
-                    <span className="text-[11px] text-indigo-700">
-                      Dùng trực tiếp nội dung bạn vừa chỉnh sửa bên dưới
-                    </span>
-                  </div>
-                  <div className="mt-2.5 space-y-2.5">
-                    <div className="grid gap-2.5 sm:grid-cols-2">
-                      <div>
-                        <label className="block text-[11px] font-semibold text-slate-700">
-                          Kiểu ghép phụ đề
-                        </label>
-                        <SelectField
-                          size="xs"
-                          value={burnMode}
-                          onChange={(val) =>
-                            setBurnMode(
-                              val === "softsub" ? "softsub" : "hardsub"
-                            )
-                          }
-                          ariaLabel="Kiểu ghép phụ đề vào video"
-                          className="mt-1"
-                          options={[
-                            {
-                              value: "hardsub",
-                              label: "In cứng (Hardsub)",
-                              badge: "Khuyên dùng",
-                              description:
-                                "Mọi thiết bị/Zalo đều hiện & giữ màu vai trò",
-                            },
-                            {
-                              value: "softsub",
-                              label: "Phụ đề mềm (Softsub mov_text)",
-                              description:
-                                "Xuất cực nhanh, người xem tự bật/tắt phụ đề",
-                            },
-                          ]}
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-[11px] font-semibold text-slate-700">
-                          Font chữ Google (Tiếng Việt &amp; Icon)
-                        </label>
-                        <SelectField
-                          size="xs"
-                          value={subtitleFont}
-                          onChange={(val) =>
-                            setSubtitleFont(
-                              val as "Be Vietnam Pro" | "Noto Sans" | "Lexend"
-                            )
-                          }
-                          disabled={burnMode === "softsub"}
-                          ariaLabel="Chọn font chữ Google cho phụ đề"
-                          className="mt-1"
-                          options={[
-                            {
-                              value: "Be Vietnam Pro",
-                              label: "Be Vietnam Pro",
-                              badge: "Khuyên dùng",
-                              description: "Dấu tiếng Việt cực nét, hiện đại",
-                            },
-                            {
-                              value: "Noto Sans",
-                              label: "Noto Sans",
-                              description: "Chuẩn phiên âm IPA & đa ngôn ngữ",
-                            },
-                            {
-                              value: "Lexend",
-                              label: "Lexend",
-                              description: "Khoáng đạt, dễ đọc khi luyện nghe",
-                            },
-                          ]}
-                        />
-                      </div>
-                    </div>
-
-                    <div className="rounded-lg border border-slate-200 bg-white p-2.5 shadow-2xs">
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <span className="text-[11px] font-semibold text-slate-700">
-                          Thành phần hiển thị trên phụ đề (đồng bộ Xem trước &amp; Video):
-                        </span>
-                        <div className="flex flex-wrap items-center gap-1.5">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setShowSubRole(true);
-                              setShowSubSpeaker(true);
-                              setShowSubText(true);
-                              setShowSubTranslation(true);
-                              setShowSubGrammar(true);
-                            }}
-                            className="rounded-md border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-[10px] font-semibold text-indigo-700 hover:bg-indigo-100"
-                          >
-                            Hiện đầy đủ
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setShowSubRole(false);
-                              setShowSubSpeaker(false);
-                              setShowSubText(true);
-                              setShowSubTranslation(false);
-                              setShowSubGrammar(false);
-                            }}
-                            className="rounded-md border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-semibold text-slate-700 hover:bg-slate-100"
-                          >
-                            Chỉ lời thoại sạch
-                          </button>
-                        </div>
-                      </div>
-                      <div className="mt-2 flex flex-wrap gap-1.5">
-                        {[
-                          {
-                            id: "role",
-                            label: "Vai trò (GV/HS)",
-                            checked: showSubRole,
-                            onChange: setShowSubRole,
-                          },
-                          {
-                            id: "speaker",
-                            label: "Tên người nói",
-                            checked: showSubSpeaker,
-                            onChange: setShowSubSpeaker,
-                          },
-                          {
-                            id: "text",
-                            label: "Lời thoại gốc",
-                            checked: showSubText,
-                            onChange: setShowSubText,
-                          },
-                          {
-                            id: "translation",
-                            label: "Bản dịch tiếng Việt",
-                            checked: showSubTranslation,
-                            onChange: setShowSubTranslation,
-                          },
-                          {
-                            id: "grammar",
-                            label: "Gợi ý sửa lỗi",
-                            checked: showSubGrammar,
-                            onChange: setShowSubGrammar,
-                          },
-                        ].map((item) => (
-                          <label
-                            key={item.id}
-                            className={`inline-flex cursor-pointer select-none items-center gap-1.5 rounded-lg border px-2.5 py-1 text-[11px] font-semibold transition ${
-                              item.checked
-                                ? "border-indigo-300 bg-indigo-50 text-indigo-800 shadow-2xs"
-                                : "border-slate-200 bg-slate-50/70 text-slate-500 hover:border-slate-300 hover:bg-slate-100"
-                            }`}
-                          >
-                            <input
-                              type="checkbox"
-                              checked={item.checked}
-                              onChange={(e) => item.onChange(e.target.checked)}
-                              className="sr-only"
-                            />
-                            <span
-                              className={`inline-flex h-3.5 w-3.5 items-center justify-center rounded border transition ${
-                                item.checked
-                                  ? "border-indigo-600 bg-indigo-600 text-white"
-                                  : "border-slate-300 bg-white text-transparent"
-                              }`}
-                            >
-                              <Check className="h-2.5 w-2.5 stroke-[3]" />
-                            </span>
-                            {item.label}
-                          </label>
-                        ))}
-                      </div>
-                    </div>
-
-                    {scriptDirty && (
-                      <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
-                        <span>
-                          Script vừa có chỉnh sửa chưa lưu ra file. Hãy lưu lại để đồng bộ với video xuất ra.
-                        </span>
-                        <button
-                          type="button"
-                          disabled={exportBusy}
-                          onClick={() => void handleSaveUpdatedMarkdown()}
-                          className="inline-flex items-center gap-1 rounded-md bg-amber-500 px-2.5 py-1 text-[11px] font-bold text-white hover:bg-amber-600 disabled:opacity-50"
-                        >
-                          <Download className="h-3 w-3" />
-                          Lưu file ngay
-                        </button>
-                      </div>
-                    )}
-
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <span
-                        className={`text-[11px] ${
-                          !showSubText && !showSubTranslation && !showSubGrammar
-                            ? "font-medium text-rose-600"
-                            : "text-slate-500"
-                        }`}
-                      >
-                        {!showSubText && !showSubTranslation && !showSubGrammar
-                          ? "Hãy bật ít nhất 1 nội dung (Lời thoại, Dịch hoặc Gợi ý sửa)."
-                          : burnMode === "hardsub"
-                          ? "Tự đóng gói Noto Emoji vector & tự chỉnh cỡ chữ theo video ngang/dọc."
-                          : "Softsub dùng font mặc định của trình phát video."}
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => void handleEmbedSubtitlesVideo()}
-                        disabled={
-                          taskId !== null ||
-                          !ffmpegAvailable ||
-                          scriptResult.transcript.segments.length === 0 ||
-                          (!showSubText &&
-                            !showSubTranslation &&
-                            !showSubGrammar)
-                        }
-                        className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-indigo-600 px-3.5 py-1.5 text-xs font-bold text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        <Film className="h-3.5 w-3.5" />
-                        Xuất Video + Script
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {subtitledVideoOutput && (
-                <MediaResultCard
-                  output={subtitledVideoOutput}
-                  actionLabel={
-                    burnMode === "hardsub"
-                      ? "Video Hardsub (In cứng Script)"
-                      : "Video Softsub (Phụ đề mềm)"
-                  }
-                />
-              )}
-
-              {/* Segments Timeline List with Inline Editor */}
-              <div className="space-y-2">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <span className="text-xs font-bold text-slate-700">
-                    Lời thoại chi tiết ({scriptResult.transcript.segments.length} câu — bấm biểu tượng bút để sửa từng câu)
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => insertSegmentAfter(null)}
-                    className="inline-flex items-center gap-1 rounded-lg border border-indigo-200 bg-indigo-50 px-2.5 py-1 text-[11px] font-semibold text-indigo-700 hover:bg-indigo-100"
-                  >
-                    <Plus className="h-3.5 w-3.5" />
-                    Thêm câu thoại
-                  </button>
-                </div>
-
-                {filteredSegments.length === 0 ? (
-                  <p className="rounded-lg bg-slate-50 py-6 text-center text-xs text-slate-500">
-                    Không có đoạn hội thoại nào khớp với bộ lọc hiện tại.
-                  </p>
-                ) : (
-                  filteredSegments.map(({ seg, originalIdx }) => {
-                    const roleInfo = roleBadgeStyle(seg.role);
-                    const timeLabel = seg.end_time.trim()
-                      ? `${seg.start_time.trim()} – ${seg.end_time.trim()}`
-                      : seg.start_time.trim();
-                    const isEditing = editingSegIdx === originalIdx;
-                    const isPlayingNow = activeSegmentIdx === originalIdx;
-
-                    return (
-                      <div
-                        key={`seg-${originalIdx}`}
-                        className={`rounded-xl border p-3 transition ${
-                          isPlayingNow
-                            ? "border-indigo-500 bg-indigo-50/40 ring-2 ring-indigo-200"
-                            : isEditing
-                            ? "border-indigo-300 bg-white shadow-xs"
-                            : "border-slate-200 bg-slate-50/50 hover:border-indigo-200 hover:bg-white"
-                        }`}
-                      >
-                        <div className="flex flex-wrap items-center justify-between gap-2">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <button
-                              type="button"
-                              onClick={() => seekPlayerTo(seg.start_time)}
-                              title={`Tua player cột trái tới ${seg.start_time} và phát`}
-                              className="inline-flex items-center gap-1 rounded-md border border-indigo-200 bg-indigo-50 px-2 py-0.5 font-mono text-[11px] font-semibold text-indigo-700 hover:bg-indigo-100"
-                            >
-                              <Play className="h-2.5 w-2.5 fill-current" />
-                              {timeLabel}
-                            </button>
-                            <span
-                              className={`rounded-full border px-2 py-0.5 text-[10px] font-bold ${roleInfo.badgeClass}`}
-                            >
-                              {roleInfo.label}
-                            </span>
-                            <span className="text-xs font-bold text-slate-900">
-                              {seg.speaker_label}
-                            </span>
-                            {isPlayingNow && (
-                              <span className="rounded bg-indigo-600 px-1.5 py-0.5 text-[10px] font-bold text-white">
-                                Đang phát
-                              </span>
-                            )}
-                          </div>
-
-                          <div className="flex items-center gap-1">
-                            <button
-                              type="button"
-                              onClick={() =>
-                                setEditingSegIdx(isEditing ? null : originalIdx)
-                              }
-                              className={`inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-[11px] font-semibold ${
-                                isEditing
-                                  ? "border-indigo-500 bg-indigo-600 text-white"
-                                  : "border-slate-200 bg-white text-slate-600 hover:bg-slate-100"
-                              }`}
-                              title={
-                                isEditing
-                                  ? "Đóng trình sửa câu này"
-                                  : "Sửa lời thoại, thời gian hoặc người nói"
-                              }
-                            >
-                              {isEditing ? (
-                                <>
-                                  <Check className="h-3 w-3" />
-                                  Xong
-                                </>
-                              ) : (
-                                <>
-                                  <Pencil className="h-3 w-3" />
-                                  Sửa
-                                </>
-                              )}
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => insertSegmentAfter(originalIdx)}
-                              className="rounded-md border border-slate-200 bg-white p-1 text-slate-500 hover:bg-indigo-50 hover:text-indigo-700"
-                              title="Chèn thêm câu thoại ngay dưới dòng này"
-                            >
-                              <Plus className="h-3 w-3" />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => deleteSegmentAt(originalIdx)}
-                              className="rounded-md border border-slate-200 bg-white p-1 text-slate-500 hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600"
-                              title="Xóa dòng thoại này"
-                            >
-                              <Trash2 className="h-3 w-3" />
-                            </button>
-                          </div>
-                        </div>
-
-                        {isEditing ? (
-                          <div className="mt-2.5 space-y-2 border-t border-slate-100 pt-2.5">
-                            <div className="grid gap-2 sm:grid-cols-12">
-                              <div className="sm:col-span-4">
-                                <label className="block text-[10px] font-semibold text-slate-600">
-                                  Chọn người nói
-                                </label>
-                                <SelectField
-                                  size="xs"
-                                  value={
-                                    scriptResult.transcript.speakers.some(
-                                      (s) => s.id === seg.speaker_id
-                                    )
-                                      ? seg.speaker_id
-                                      : ""
-                                  }
-                                  onChange={(val) => {
-                                    if (val) {
-                                      assignSegmentSpeaker(originalIdx, val);
-                                    }
-                                  }}
-                                  placeholder="-- Chọn người nói --"
-                                  ariaLabel="Chọn người nói cho đoạn thoại"
-                                  className="mt-0.5"
-                                  options={scriptResult.transcript.speakers.map(
-                                    (sp) => ({
-                                      value: sp.id,
-                                      label: sp.label,
-                                      badge: roleBadgeStyle(sp.role).label,
-                                    })
-                                  )}
-                                />
-                              </div>
-
-                              <div className="sm:col-span-4">
-                                <div className="flex items-center justify-between">
-                                  <label className="text-[10px] font-semibold text-slate-600">
-                                    Bắt đầu
-                                  </label>
-                                  <button
-                                    type="button"
-                                    onClick={() =>
-                                      captureSegmentTime(originalIdx, "start_time")
-                                    }
-                                    className="text-[10px] font-semibold text-indigo-600 hover:underline"
-                                  >
-                                    Lấy giờ Player
-                                  </button>
-                                </div>
-                                <input
-                                  type="text"
-                                  value={seg.start_time}
-                                  onChange={(e) =>
-                                    updateSegmentAt(originalIdx, {
-                                      start_time: e.target.value,
-                                    })
-                                  }
-                                  className="mt-0.5 w-full rounded-md border border-slate-200 px-2 py-1 font-mono text-xs focus:border-indigo-400 focus:outline-none"
-                                />
-                              </div>
-
-                              <div className="sm:col-span-4">
-                                <div className="flex items-center justify-between">
-                                  <label className="text-[10px] font-semibold text-slate-600">
-                                    Kết thúc
-                                  </label>
-                                  <button
-                                    type="button"
-                                    onClick={() =>
-                                      captureSegmentTime(originalIdx, "end_time")
-                                    }
-                                    className="text-[10px] font-semibold text-indigo-600 hover:underline"
-                                  >
-                                    Lấy giờ Player
-                                  </button>
-                                </div>
-                                <input
-                                  type="text"
-                                  value={seg.end_time}
-                                  onChange={(e) =>
-                                    updateSegmentAt(originalIdx, {
-                                      end_time: e.target.value,
-                                    })
-                                  }
-                                  className="mt-0.5 w-full rounded-md border border-slate-200 px-2 py-1 font-mono text-xs focus:border-indigo-400 focus:outline-none"
-                                />
-                              </div>
-                            </div>
-
-                            <div>
-                              <label className="block text-[10px] font-semibold text-slate-600">
-                                Nội dung lời nói
-                              </label>
-                              <textarea
-                                rows={2}
-                                value={seg.text}
-                                onChange={(e) =>
-                                  updateSegmentAt(originalIdx, {
-                                    text: e.target.value,
-                                  })
-                                }
-                                placeholder="Nhập lời nói chuẩn..."
-                                className="mt-0.5 w-full rounded-md border border-slate-200 px-2.5 py-1.5 text-sm focus:border-indigo-400 focus:outline-none"
-                              />
-                              <SubtitleIconQuickBar
-                                label="Chèn icon"
-                                value={seg.text}
-                                onChange={(next) =>
-                                  updateSegmentAt(originalIdx, { text: next })
-                                }
-                              />
-                            </div>
-
-                            <div className="grid gap-2 sm:grid-cols-2">
-                              <div>
-                                <label className="block text-[10px] font-semibold text-slate-600">
-                                  Bản dịch tiếng Việt (tùy chọn)
-                                </label>
-                                <input
-                                  type="text"
-                                  value={seg.translation}
-                                  onChange={(e) =>
-                                    updateSegmentAt(originalIdx, {
-                                      translation: e.target.value,
-                                    })
-                                  }
-                                  placeholder="Dịch nghĩa..."
-                                  className="mt-0.5 w-full rounded-md border border-slate-200 px-2 py-1 text-xs focus:border-indigo-400 focus:outline-none"
-                                />
-                              </div>
-                              <div>
-                                <label className="block text-[10px] font-semibold text-slate-600">
-                                  Gợi ý sửa lỗi / Nhận xét (tùy chọn)
-                                </label>
-                                <input
-                                  type="text"
-                                  value={seg.grammar_note}
-                                  onChange={(e) =>
-                                    updateSegmentAt(originalIdx, {
-                                      grammar_note: e.target.value,
-                                    })
-                                  }
-                                  placeholder="VD: Nên dùng 'went' thay vì 'go'..."
-                                  className="mt-0.5 w-full rounded-md border border-slate-200 px-2 py-1 text-xs focus:border-indigo-400 focus:outline-none"
-                                />
-                                <SubtitleIconQuickBar
-                                  label="Icon sửa lỗi"
-                                  value={seg.grammar_note}
-                                  onChange={(next) =>
-                                    updateSegmentAt(originalIdx, {
-                                      grammar_note: next,
-                                    })
-                                  }
-                                />
-                              </div>
-                            </div>
-                          </div>
-                        ) : (
-                          <>
-                            <p className="mt-1.5 text-sm leading-relaxed text-slate-800">
-                              {seg.text || (
-                                <span className="italic text-slate-400">
-                                  (Chưa có lời thoại — bấm Sửa để nhập)
-                                </span>
-                              )}
-                            </p>
-
-                            {seg.translation.trim() && (
-                              <p className="mt-1 text-xs italic text-slate-600">
-                                Dịch: {seg.translation}
-                              </p>
-                            )}
-
-                            {seg.grammar_note.trim() && (
-                              <div className="mt-1.5 rounded-lg border border-amber-200 bg-amber-50/70 px-2.5 py-1.5 text-xs text-amber-900">
-                                💡 <strong>Gợi ý sửa:</strong> {seg.grammar_note}
-                              </div>
-                            )}
-                          </>
-                        )}
-                      </div>
-                    );
-                  })
-                )}
-              </div>
-            </div>
+            <MediaScriptResultPanel
+              scriptResult={scriptResult}
+              hasVideoSource={!isSourceAudio && Boolean(sourceFile)}
+              ffmpegAvailable={ffmpegAvailable}
+              isTaskBusy={taskId !== null}
+              exportBusy={exportBusy}
+              exportNotice={exportNotice}
+              copiedMd={copiedMd}
+              scriptDirty={scriptDirty}
+              scriptSearch={scriptSearch}
+              setScriptSearch={setScriptSearch}
+              filteredSegments={filteredSegments}
+              activeSegmentIdx={activeSegmentIdx}
+              editingSegIdx={editingSegIdx}
+              setEditingSegIdx={setEditingSegIdx}
+              burnMode={burnMode}
+              setBurnMode={setBurnMode}
+              subtitleFont={subtitleFont}
+              setSubtitleFont={setSubtitleFont}
+              showSubRole={showSubRole}
+              setShowSubRole={setShowSubRole}
+              showSubSpeaker={showSubSpeaker}
+              setShowSubSpeaker={setShowSubSpeaker}
+              showSubText={showSubText}
+              setShowSubText={setShowSubText}
+              showSubTranslation={showSubTranslation}
+              setShowSubTranslation={setShowSubTranslation}
+              showSubGrammar={showSubGrammar}
+              setShowSubGrammar={setShowSubGrammar}
+              subtitledVideoOutput={subtitledVideoOutput}
+              onCopyScriptMarkdown={() => void handleCopyScriptMarkdown()}
+              onSaveUpdatedMarkdown={() => void handleSaveUpdatedMarkdown()}
+              onExportScriptAs={(fmt) => void handleExportScriptAs(fmt)}
+              onSpeakerChange={handleSpeakerChange}
+              onEmbedSubtitlesVideo={() => void handleEmbedSubtitlesVideo()}
+              onSeekPlayerTo={seekPlayerTo}
+              onInsertSegmentAfter={insertSegmentAfter}
+              onDeleteSegmentAt={deleteSegmentAt}
+              onAssignSegmentSpeaker={assignSegmentSpeaker}
+              onCaptureSegmentTime={captureSegmentTime}
+              onUpdateSegmentAt={updateSegmentAt}
+            />
           )}
 
           {sessionHistory.length > 1 && (
@@ -2167,38 +1293,6 @@ export function MediaToolsPage({
           )}
         </div>
       </div>
-    </div>
-  );
-}
-
-const SUBTITLE_QUICK_ICONS = ["🎓", "💡", "🎤", "✅", "⚠️", "⭐", "💬"] as const;
-
-function SubtitleIconQuickBar({
-  label,
-  value,
-  onChange,
-}: {
-  label: string;
-  value: string;
-  onChange: (next: string) => void;
-}) {
-  return (
-    <div className="mt-1 flex flex-wrap items-center gap-1">
-      <span className="text-[10px] text-slate-400">{label}:</span>
-      {SUBTITLE_QUICK_ICONS.map((icon) => (
-        <button
-          key={icon}
-          type="button"
-          onClick={() =>
-            onChange(value.trim() ? `${value.trimEnd()} ${icon}` : `${icon} `)
-          }
-          title={`Chèn ${icon}`}
-          style={{ fontFamily: `"Noto Emoji", sans-serif` }}
-          className="rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-xs leading-none hover:border-indigo-300 hover:bg-indigo-50"
-        >
-          {icon}
-        </button>
-      ))}
     </div>
   );
 }
