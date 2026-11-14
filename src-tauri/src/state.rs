@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::OnceLock;
 
 use grader_core::{AppPaths, Database, UploadCache};
 use tokio::sync::Mutex;
@@ -14,6 +15,7 @@ pub struct AppState {
     pub upload_cache: UploadCache,
     pub media_server: MediaServer,
     pub activity_log: ActivityLog,
+    resource_dir: OnceLock<PathBuf>,
     cancel_tokens: Mutex<HashMap<String, CancellationToken>>,
 }
 
@@ -50,8 +52,13 @@ impl AppState {
             upload_cache: UploadCache::new(),
             media_server,
             activity_log,
+            resource_dir: OnceLock::new(),
             cancel_tokens: Mutex::new(HashMap::new()),
         })
+    }
+
+    pub fn set_resource_dir(&self, dir: PathBuf) {
+        let _ = self.resource_dir.set(dir);
     }
 
     /// Resolve effective Gemini API key:
@@ -100,6 +107,9 @@ impl AppState {
 
     pub fn resolve_fonts_dir(&self) -> Option<PathBuf> {
         let mut candidates: Vec<PathBuf> = Vec::new();
+        if let Some(res_dir) = self.resource_dir.get() {
+            candidates.push(res_dir.join("fonts"));
+        }
         if let Ok(cwd) = std::env::current_dir() {
             candidates.push(cwd.join("ui/public/fonts"));
             candidates.push(cwd.join("../ui/public/fonts"));

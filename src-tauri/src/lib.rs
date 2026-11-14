@@ -4,6 +4,7 @@ mod media_server;
 mod state;
 
 use state::AppState;
+use tauri::Manager;
 
 #[cfg(target_os = "linux")]
 fn configure_linux_media_env() {
@@ -30,6 +31,12 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .manage(app_state)
+        .setup(|app| {
+            if let Ok(res_dir) = app.path().resource_dir() {
+                app.state::<AppState>().set_resource_dir(res_dir);
+            }
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             commands::get_bootstrap,
             commands::authorize_media_path,

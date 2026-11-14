@@ -1,6 +1,6 @@
 [package]
 name = "englishspeak-grader-app"
-version = "0.1.0"
+version = "0.2.0"
 description = "App AI (Gemini) hỗ trợ giáo viên tiếng Anh chấm bài nói qua video"
 authors = ["EnglishSpeak Grader Contributors"]
 edition = "2021"
