@@ -675,6 +675,18 @@ fn test_format_transcript_ass_with_options_fonts_icons_and_portrait() {
     assert!(no_text_ass.contains("Dịch:"));
     assert!(no_text_ass.contains("Sửa:"));
 
+    // Ẩn toàn bộ nội dung (lời thoại + dịch + sửa lỗi) -> không xuất cue rỗng
+    let all_hidden_opts = AssSubtitleOptions {
+        show_text: false,
+        show_translation: Some(false),
+        show_grammar: Some(false),
+        ..Default::default()
+    };
+    let all_hidden_ass = format_transcript_ass_with_options(&sample, &all_hidden_opts);
+    assert!(!all_hidden_ass.contains("Dialogue:"));
+    let all_hidden_srt = format_transcript_srt_with_options(&sample, &all_hidden_opts);
+    assert!(all_hidden_srt.trim().is_empty());
+
     // Khử trùng lặp khi speaker_label trùng "Giáo viên"
     let mut dup_sample = sample.clone();
     dup_sample.segments[0].speaker_label = "Giáo viên".into();

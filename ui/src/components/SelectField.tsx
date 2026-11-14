@@ -170,7 +170,7 @@ export function SelectField<T extends string = string>({
 
   useEffect(() => {
     if (!open || highlightedIndex < 0) return;
-    optionRefs.current[highlightedIndex]?.scrollIntoView({ block: "nearest" });
+    optionRefs.current[highlightedIndex]?.scrollIntoView?.({ block: "nearest" });
   }, [open, highlightedIndex]);
 
   const handleSelect = (opt: SelectOption<T>) => {
