@@ -293,7 +293,7 @@ export function App() {
 
       {/* Main Content */}
       <main className="mx-auto w-full max-w-[1760px] flex-1 px-3 py-4 sm:px-5 lg:px-6">
-        {tab === "grade" && (
+        <div className={tab === "grade" ? "" : "hidden"}>
           <GradePage
             apiKeyInput={apiKeyInput}
             model={selectedModel}
@@ -313,7 +313,7 @@ export function App() {
               )
             }
           />
-        )}
+        </div>
 
         {tab === "rubrics" && (
           <RubricsPage
@@ -326,7 +326,7 @@ export function App() {
           />
         )}
 
-        {tab === "media" && (
+        <div className={tab === "media" ? "" : "hidden"}>
           <MediaToolsPage
             apiKeyInput={apiKeyInput}
             model={selectedModel}
@@ -336,7 +336,7 @@ export function App() {
             defaultExportDir={bootstrap.export_dir}
             hasCustomExportDir={bootstrap.has_custom_export_dir}
           />
-        )}
+        </div>
 
         {tab === "history" && <HistoryPage />}
 

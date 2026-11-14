@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { ConfirmDialog } from "../components/ConfirmDialog";
 import {
   BookmarkPlus,
   ChevronDown,
@@ -341,12 +342,18 @@ export function GradePage({
     }
   }
 
-  async function handleDeleteAssignment() {
+  const [confirmDeleteAssignmentOpen, setConfirmDeleteAssignmentOpen] =
+    useState(false);
+
+  function handleDeleteAssignment() {
     if (!selectedAssignmentId) return;
+    setConfirmDeleteAssignmentOpen(true);
+  }
+
+  async function executeDeleteAssignment() {
+    if (!selectedAssignmentId) return;
+    setConfirmDeleteAssignmentOpen(false);
     const found = gradingAssignments.find((a) => a.id === selectedAssignmentId);
-    if (!confirm(`Xóa đợt chấm đã lưu "${found?.name ?? selectedAssignmentId}"?`)) {
-      return;
-    }
     setErrorMsg("");
     try {
       const updated = await api.deleteGradingAssignment(selectedAssignmentId);
@@ -1009,7 +1016,7 @@ export function GradePage({
                       type="button"
                       onClick={() => removeImage(idx)}
                       disabled={busyTaskId !== null}
-                      className="absolute right-0.5 top-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-slate-900/75 text-white hover:bg-rose-600"
+                      className="absolute right-0.5 top-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-black/75 text-white hover:bg-rose-600"
                       title="Xóa ảnh này"
                     >
                       <X className="h-2.5 w-2.5" />
@@ -1224,6 +1231,18 @@ export function GradePage({
           </div>
         </div>
       )}
+
+      <ConfirmDialog
+        open={confirmDeleteAssignmentOpen}
+        title={`Xóa đợt chấm đã lưu "${
+          gradingAssignments.find((a) => a.id === selectedAssignmentId)?.name ??
+          selectedAssignmentId
+        }"?`}
+        description="Cấu hình đề bài và ảnh đính kèm đã lưu trong đợt chấm này sẽ bị xóa."
+        confirmLabel="Xóa đợt chấm"
+        onConfirm={() => void executeDeleteAssignment()}
+        onCancel={() => setConfirmDeleteAssignmentOpen(false)}
+      />
     </div>
   );
 }

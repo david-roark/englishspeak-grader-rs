@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { ConfirmDialog } from "../components/ConfirmDialog";
 import {
   LayoutList,
   Loader2,
@@ -113,8 +114,14 @@ export function HistoryPage() {
     }
   }
 
-  async function handleDelete(id: number) {
-    if (!confirm(`Xóa bản ghi chấm bài #${id}?`)) return;
+  const [deleteTargetId, setDeleteTargetId] = useState<number | null>(null);
+
+  function handleDelete(id: number) {
+    setDeleteTargetId(id);
+  }
+
+  async function executeDelete(id: number) {
+    setDeleteTargetId(null);
     try {
       await api.deleteAssessment(id);
       if (selected?.id === id) setSelected(null);
@@ -335,6 +342,17 @@ export function HistoryPage() {
           </div>
         </div>
       )}
+
+      <ConfirmDialog
+        open={deleteTargetId !== null}
+        title={`Xóa bản ghi chấm bài #${deleteTargetId ?? ""}?`}
+        description="Bản ghi này sẽ bị xóa vĩnh viễn khỏi lịch sử SQLite và không thể khôi phục."
+        confirmLabel="Xóa bản ghi"
+        onConfirm={() => {
+          if (deleteTargetId !== null) void executeDelete(deleteTargetId);
+        }}
+        onCancel={() => setDeleteTargetId(null)}
+      />
     </div>
   );
 }

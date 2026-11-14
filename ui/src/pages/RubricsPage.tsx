@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { ConfirmDialog } from "../components/ConfirmDialog";
 import {
   ArrowDown,
   ArrowUp,
@@ -258,8 +259,14 @@ export function RubricsPage({
     }
   }
 
-  async function handleDelete(r: Rubric) {
-    if (!confirm(`Xóa rubric tùy chỉnh "${r.name}"?`)) return;
+  const [deleteTarget, setDeleteTarget] = useState<Rubric | null>(null);
+
+  function handleDelete(r: Rubric) {
+    setDeleteTarget(r);
+  }
+
+  async function executeDelete(r: Rubric) {
+    setDeleteTarget(null);
     setMsg("");
     setErr("");
     try {
@@ -1036,6 +1043,17 @@ export function RubricsPage({
           </div>
         </div>
       </div>
+
+      <ConfirmDialog
+        open={deleteTarget !== null}
+        title={`Xóa rubric tùy chỉnh "${deleteTarget?.name ?? ""}"?`}
+        description="Rubric này sẽ bị xóa khỏi danh sách rubric tùy chỉnh."
+        confirmLabel="Xóa rubric"
+        onConfirm={() => {
+          if (deleteTarget) void executeDelete(deleteTarget);
+        }}
+        onCancel={() => setDeleteTarget(null)}
+      />
     </div>
   );
 }

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { ConfirmDialog } from "./ConfirmDialog";
 import {
   AlertTriangle,
   ArrowDown,
@@ -141,9 +142,13 @@ export function PromptConfigSection({
     previewExtra,
   ]);
 
+  const [pendingSwitchId, setPendingSwitchId] = useState<string | null>(null);
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
+
   function handleSelectProfile(nextId: string) {
     if (nextId === selectedId) return;
-    if (isDirty && !confirm("Bạn có thay đổi chưa lưu ở profile hiện tại. Chuyển qua profile khác?")) {
+    if (isDirty) {
+      setPendingSwitchId(nextId);
       return;
     }
     setPromptMsg("");
@@ -255,9 +260,14 @@ export function PromptConfigSection({
     }
   }
 
-  async function handleDeleteProfile() {
+  function handleDeleteProfile() {
     if (draft.id === "default") return;
-    if (!confirm(`Xóa Prompt Profile "${draft.name}"?`)) return;
+    setConfirmDeleteOpen(true);
+  }
+
+  async function executeDeleteProfile() {
+    if (draft.id === "default") return;
+    setConfirmDeleteOpen(false);
     setPromptMsg("");
     setPromptErr("");
     try {
@@ -910,6 +920,32 @@ export function PromptConfigSection({
           )}
         </div>
       )}
+
+      <ConfirmDialog
+        open={pendingSwitchId !== null}
+        title="Chuyển qua Prompt Profile khác?"
+        description="Bạn có thay đổi chưa lưu ở profile hiện tại. Nếu chuyển ngay, các chỉnh sửa chưa lưu sẽ bị bỏ qua."
+        confirmLabel="Chuyển profile"
+        tone="warning"
+        onConfirm={() => {
+          if (pendingSwitchId) {
+            setPromptMsg("");
+            setPromptErr("");
+            setSelectedId(pendingSwitchId);
+          }
+          setPendingSwitchId(null);
+        }}
+        onCancel={() => setPendingSwitchId(null)}
+      />
+
+      <ConfirmDialog
+        open={confirmDeleteOpen}
+        title={`Xóa Prompt Profile "${draft.name}"?`}
+        description="Hồ sơ prompt này sẽ bị xóa vĩnh viễn khỏi SQLite."
+        confirmLabel="Xóa profile"
+        onConfirm={() => void executeDeleteProfile()}
+        onCancel={() => setConfirmDeleteOpen(false)}
+      />
     </div>
   );
 }
