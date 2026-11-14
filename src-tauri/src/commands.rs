@@ -3,11 +3,13 @@ use std::time::{Duration, Instant};
 
 use grader_core::export::{default_export_path, export_to_excel};
 use grader_core::{
-    build_prompt_parts, compress_video_to, extract_mp3_to, fmt_num, format_result_markdown,
-    mp3_presets, mute_video_to, probe_duration_secs, resolve_ffmpeg, trim_media_to, video_presets,
-    AssessmentDetail, AssessmentSummary, AssignmentImage, GeminiClient, GradingAssignment,
-    MediaResolution, Mp3Preset, NewAssessment, PromptParts, PromptProfile, Rubric, VideoPreset,
-    DEFAULT_MODEL, FALLBACK_MODELS,
+    build_prompt_parts, compress_video_to, extract_mp3_to, extract_speech_mp3_to, fmt_num,
+    format_result_markdown, format_transcript_markdown, format_transcript_srt,
+    format_transcript_text, mp3_presets, mute_video_to, probe_duration_secs, resolve_ffmpeg,
+    trim_media_to, video_presets, AssessmentDetail, AssessmentSummary, AssignmentImage,
+    GeminiClient, GradingAssignment, MediaResolution, Mp3Preset, NewAssessment, PromptParts,
+    PromptProfile, Rubric, TranscribeOptions, TranscriptResult, VideoPreset, DEFAULT_MODEL,
+    FALLBACK_MODELS,
 };
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State};
@@ -85,6 +87,40 @@ pub struct MediaOutput {
     pub size_bytes: u64,
     pub size_mb: f64,
     pub orig_size_mb: f64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct GenerateScriptRequest {
+    pub task_id: String,
+    pub api_key: Option<String>,
+    pub input_path: String,
+    pub model: String,
+    pub mp3_preset: String,
+    #[serde(default = "default_true")]
+    pub enhance_speech: bool,
+    #[serde(default = "default_true")]
+    pub keep_mp3: bool,
+    pub interaction_mode: String,
+    pub speaker_hints: String,
+    pub verbatim_mode: String,
+    pub include_translation: bool,
+    pub include_grammar_notes: bool,
+    pub extra_instructions: String,
+    pub out_dir_override: Option<String>,
+    pub out_path_override: Option<String>,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct GenerateScriptResponse {
+    pub transcript: TranscriptResult,
+    pub source_name: String,
+    pub script_output: MediaOutput,
+    pub mp3_output: Option<MediaOutput>,
+    pub reused_upload_cache: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -632,6 +668,253 @@ pub async fn mute_video_cmd(
         orig_size_mb,
         "muted.mp4",
     ))
+}
+
+fn render_transcript_by_format(
+    transcript: &TranscriptResult,
+    source_name: &str,
+    format: &str,
+) -> (String, &'static str) {
+    match format.trim().to_ascii_lowercase().as_str() {
+        "srt" => (format_transcript_srt(transcript), "srt"),
+        "txt" => (format_transcript_text(transcript, source_name), "txt"),
+        _ => (format_transcript_markdown(transcript, source_name), "md"),
+    }
+}
+
+fn write_transcript_to_path(
+    transcript: &TranscriptResult,
+    source_name: &str,
+    format: &str,
+    target_path: &Path,
+) -> Result<(), String> {
+    if let Some(parent) = target_path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("Không tạo được thư mục lưu script: {e}"))?;
+    }
+    let (content, _) = render_transcript_by_format(transcript, source_name, format);
+    std::fs::write(target_path, content).map_err(|e| format!("Không ghi được file script: {e}"))
+}
+
+#[tauri::command]
+pub async fn generate_script_cmd(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    req: GenerateScriptRequest,
+) -> Result<GenerateScriptResponse, String> {
+    let src = PathBuf::from(&req.input_path);
+    if !src.is_file() {
+        return Err("Chưa chọn file video hoặc audio hợp lệ.".into());
+    }
+    state.media_server.authorize_path(&src);
+
+    let key = state.resolve_api_key(req.api_key.as_deref());
+    let client = GeminiClient::new(&key).map_err(|e| e.to_string())?;
+
+    let orig_size_mb = std::fs::metadata(&src)
+        .map(|m| m.len() as f64 / (1024.0 * 1024.0))
+        .unwrap_or(0.0);
+    let source_name = src
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("media")
+        .to_string();
+    let stem = src
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .filter(|s| !s.is_empty())
+        .unwrap_or("script");
+
+    let (out_dir, out_file) =
+        resolve_media_output_targets(&state, req.out_dir_override, req.out_path_override);
+    let mp3_out_dir = out_file
+        .as_deref()
+        .and_then(Path::parent)
+        .filter(|p| !p.as_os_str().is_empty())
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| out_dir.clone());
+
+    let is_mp3 = src
+        .extension()
+        .and_then(|s| s.to_str())
+        .is_some_and(|e| e.eq_ignore_ascii_case("mp3"));
+    let need_extract = !is_mp3 || req.enhance_speech || req.keep_mp3;
+
+    let cancel = state.register_task(&req.task_id).await;
+    let mut temp_mp3_to_cleanup: Option<PathBuf> = None;
+
+    let mp3_path_res: Result<Option<PathBuf>, String> = if need_extract {
+        match resolve_ffmpeg_for_state(&state) {
+            Ok(ffmpeg) => {
+                let mp3_target = if req.keep_mp3 {
+                    let candidate = mp3_out_dir.join(format!("{stem}_speech.mp3"));
+                    if candidate == src {
+                        mp3_out_dir.join(format!("{stem}_speech_cleaned.mp3"))
+                    } else {
+                        candidate
+                    }
+                } else {
+                    let safe_id: String = req
+                        .task_id
+                        .chars()
+                        .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+                        .collect();
+                    let tmp = std::env::temp_dir().join(format!("englishspeak_{safe_id}.mp3"));
+                    temp_mp3_to_cleanup = Some(tmp.clone());
+                    tmp
+                };
+
+                extract_speech_mp3_to(
+                    &ffmpeg,
+                    &src,
+                    &req.mp3_preset,
+                    req.enhance_speech,
+                    &mp3_out_dir,
+                    Some(&mp3_target),
+                    |p| {
+                        let mapped = p.percent.map(|v| (v * 0.35).min(35.0));
+                        emit_progress(&app, &req.task_id, p.stage, mapped);
+                    },
+                    Some(&cancel),
+                )
+                .await
+                .map(Some)
+                .map_err(|e| e.to_string())
+            }
+            Err(err) => Err(err),
+        }
+    } else {
+        Ok(None)
+    };
+
+    let extracted_mp3 = match mp3_path_res {
+        Ok(p) => p,
+        Err(err) => {
+            state.finish_task(&req.task_id).await;
+            if let Some(tmp) = &temp_mp3_to_cleanup {
+                let _ = tokio::fs::remove_file(tmp).await;
+            }
+            return Err(err);
+        }
+    };
+
+    let audio_for_gemini = extracted_mp3.clone().unwrap_or_else(|| src.clone());
+    let using_temp_mp3 = temp_mp3_to_cleanup.is_some();
+
+    let upload_res = if using_temp_mp3 {
+        client
+            .upload_video(
+                &audio_for_gemini,
+                Duration::from_secs(2),
+                Duration::from_secs(600),
+                |p| {
+                    let mapped = p.percent.map(|v| 35.0 + v * 0.25);
+                    emit_progress(&app, &req.task_id, p.stage, mapped);
+                },
+                Some(&cancel),
+            )
+            .await
+            .map(|u| (u, false))
+    } else {
+        client
+            .get_or_upload(
+                &audio_for_gemini,
+                &state.upload_cache,
+                Duration::from_secs(2),
+                Duration::from_secs(600),
+                |p| {
+                    let mapped = p.percent.map(|v| 35.0 + v * 0.25);
+                    emit_progress(&app, &req.task_id, p.stage, mapped);
+                },
+                Some(&cancel),
+            )
+            .await
+    };
+
+    let (uploaded, reused_upload_cache) = match upload_res {
+        Ok(res) => res,
+        Err(err) => {
+            state.finish_task(&req.task_id).await;
+            if let Some(tmp) = &temp_mp3_to_cleanup {
+                let _ = tokio::fs::remove_file(tmp).await;
+            }
+            return Err(err.to_string());
+        }
+    };
+
+    emit_progress(
+        &app,
+        &req.task_id,
+        format!("Gemini ({}) đang nghe audio & chép script...", req.model),
+        Some(62.0),
+    );
+
+    let opts = TranscribeOptions {
+        interaction_mode: req.interaction_mode,
+        speaker_hints: req.speaker_hints,
+        verbatim_mode: req.verbatim_mode,
+        include_translation: req.include_translation,
+        include_grammar_notes: req.include_grammar_notes,
+        extra_instructions: req.extra_instructions,
+    };
+
+    let transcript_res = client
+        .transcribe_audio(&uploaded, &req.model, &opts, Some(&cancel))
+        .await;
+
+    state.finish_task(&req.task_id).await;
+    if let Some(tmp) = &temp_mp3_to_cleanup {
+        let _ = tokio::fs::remove_file(tmp).await;
+    }
+    if using_temp_mp3 {
+        client.cleanup_file(&uploaded.name).await;
+    }
+
+    let transcript = transcript_res.map_err(|e| e.to_string())?;
+
+    emit_progress(&app, &req.task_id, "Đang lưu file Script...", Some(95.0));
+
+    let script_path = out_file.unwrap_or_else(|| out_dir.join(format!("{stem}_script.md")));
+    let script_ext = script_path
+        .extension()
+        .and_then(|s| s.to_str())
+        .unwrap_or("md");
+    write_transcript_to_path(&transcript, &source_name, script_ext, &script_path)?;
+
+    let script_output = build_media_output(&state, script_path, orig_size_mb, "script.md");
+    let mp3_output = if req.keep_mp3 {
+        extracted_mp3.map(|p| build_media_output(&state, p, orig_size_mb, "speech.mp3"))
+    } else {
+        None
+    };
+
+    emit_progress(&app, &req.task_id, "Tạo Script hoàn tất!", Some(100.0));
+
+    Ok(GenerateScriptResponse {
+        transcript,
+        source_name,
+        script_output,
+        mp3_output,
+        reused_upload_cache,
+    })
+}
+
+#[tauri::command]
+pub fn export_transcript_file(
+    state: State<'_, AppState>,
+    transcript: TranscriptResult,
+    source_name: String,
+    format: String,
+    out_path: String,
+) -> Result<MediaOutput, String> {
+    let target = PathBuf::from(out_path.trim());
+    if target.as_os_str().is_empty() {
+        return Err("Đường dẫn file xuất không hợp lệ.".into());
+    }
+    let (_, ext) = render_transcript_by_format(&transcript, &source_name, &format);
+    write_transcript_to_path(&transcript, &source_name, &format, &target)?;
+    let fallback_name = format!("script.{ext}");
+    Ok(build_media_output(&state, target, 0.0, &fallback_name))
 }
 
 #[tauri::command]

@@ -212,18 +212,24 @@ fn resolve_target_path(
     }
 }
 
-/// Dựng tham số CLI `ffmpeg` cho tách MP3 với đường dẫn xuất chỉ định.
-pub fn build_extract_mp3_args_to(
+fn build_extract_mp3_args_inner(
     video_path: &Path,
     preset_key: &str,
+    enhance_speech: bool,
     out_path: &Path,
 ) -> Vec<String> {
     let cfg = get_mp3_preset(preset_key);
-    vec![
+    let mut args = vec![
         "-y".into(),
         "-i".into(),
         video_path.to_string_lossy().into_owned(),
         "-vn".into(),
+    ];
+    if enhance_speech {
+        args.push("-af".into());
+        args.push("highpass=f=80,lowpass=f=8000,dynaudnorm".into());
+    }
+    args.extend([
         "-acodec".into(),
         "libmp3lame".into(),
         "-b:a".into(),
@@ -236,7 +242,27 @@ pub fn build_extract_mp3_args_to(
         "pipe:1".into(),
         "-nostats".into(),
         out_path.to_string_lossy().into_owned(),
-    ]
+    ]);
+    args
+}
+
+/// Dựng tham số CLI `ffmpeg` cho tách MP3 với đường dẫn xuất chỉ định.
+pub fn build_extract_mp3_args_to(
+    video_path: &Path,
+    preset_key: &str,
+    out_path: &Path,
+) -> Vec<String> {
+    build_extract_mp3_args_inner(video_path, preset_key, false, out_path)
+}
+
+/// Dựng tham số CLI `ffmpeg` cho tách MP3 tối ưu giọng nói (lọc tạp âm & cân bằng âm lượng).
+pub fn build_extract_speech_mp3_args_to(
+    video_path: &Path,
+    preset_key: &str,
+    enhance_speech: bool,
+    out_path: &Path,
+) -> Vec<String> {
+    build_extract_mp3_args_inner(video_path, preset_key, enhance_speech, out_path)
 }
 
 /// Dựng tham số CLI `ffmpeg` cho tách MP3 từ video (giúp kiểm thử deterministic không cần chạy subprocess).
@@ -554,23 +580,57 @@ pub async fn extract_mp3_to<F>(
 where
     F: FnMut(MediaProgress) + Send,
 {
+    extract_speech_mp3_to(
+        ffmpeg_exe,
+        video_path,
+        preset_key,
+        false,
+        default_out_dir,
+        out_path_override,
+        on_progress,
+        cancel,
+    )
+    .await
+}
+
+/// Tách âm thanh MP3 từ video (hỗ trợ lọc tạp âm & cân bằng giọng nói) với đường dẫn đầu ra tùy chọn.
+#[allow(clippy::too_many_arguments)]
+pub async fn extract_speech_mp3_to<F>(
+    ffmpeg_exe: &Path,
+    video_path: &Path,
+    preset_key: &str,
+    enhance_speech: bool,
+    default_out_dir: &Path,
+    out_path_override: Option<&Path>,
+    on_progress: F,
+    cancel: Option<&CancellationToken>,
+) -> Result<PathBuf>
+where
+    F: FnMut(MediaProgress) + Send,
+{
     ensure_input_exists(video_path, true)?;
     let cfg = get_mp3_preset(preset_key);
     let (stem, _) = file_stem_and_ext(video_path, "audio", "mp3");
-    let out_path = resolve_target_path(
-        default_out_dir,
-        format!("{stem}_{}.mp3", cfg.key),
-        out_path_override,
-    );
+    let default_name = if enhance_speech {
+        format!("{stem}_speech.mp3")
+    } else {
+        format!("{stem}_{}.mp3", cfg.key)
+    };
+    let out_path = resolve_target_path(default_out_dir, default_name, out_path_override);
     let duration_secs = probe_duration_secs(ffmpeg_exe, video_path).await;
-    let args = build_extract_mp3_args_to(video_path, preset_key, &out_path);
+    let args = build_extract_speech_mp3_args_to(video_path, preset_key, enhance_speech, &out_path);
+    let running_stage = if enhance_speech {
+        "Đang tách & lọc giọng nói MP3..."
+    } else {
+        "Đang tách âm thanh MP3..."
+    };
 
     execute_ffmpeg_media_job(
         ffmpeg_exe,
         out_path,
         args,
         duration_secs,
-        "Đang tách âm thanh MP3...",
+        running_stage,
         "Tách MP3 hoàn tất.",
         "Tách âm thanh thất bại",
         true,

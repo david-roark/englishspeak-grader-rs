@@ -2,13 +2,13 @@ use std::path::Path;
 use std::time::Duration;
 
 use grader_core::gemini::{
-    filter_and_sort_models, is_gradable_model, rank_model, validate_api_key, GeminiClient,
-    MediaResolution, UploadCache, UploadedFile, FALLBACK_MODELS,
+    detect_video_mime, filter_and_sort_models, is_gradable_model, rank_model, validate_api_key,
+    GeminiClient, MediaResolution, TranscribeOptions, UploadCache, UploadedFile, FALLBACK_MODELS,
 };
 use grader_core::media::{
-    build_compress_video_args, build_extract_mp3_args, build_mute_video_args_to,
-    build_trim_media_args_to, compress_video, extract_mp3, parse_duration_from_stderr,
-    resolve_ffmpeg, DEFAULT_MP3_PRESET, DEFAULT_VIDEO_PRESET,
+    build_compress_video_args, build_extract_mp3_args, build_extract_speech_mp3_args_to,
+    build_mute_video_args_to, build_trim_media_args_to, compress_video, extract_mp3,
+    parse_duration_from_stderr, resolve_ffmpeg, DEFAULT_MP3_PRESET, DEFAULT_VIDEO_PRESET,
 };
 use grader_core::prompts::PromptProfile;
 use grader_core::rubrics::{get_builtin_rubric, AssignmentImage, Rubric};
@@ -489,7 +489,12 @@ async fn test_grade_video_with_images_sends_inline_data_and_normalizes_flexible(
         mime_type: "video/mp4".into(),
         state: "ACTIVE".into(),
     };
-    let flex_rubric = Rubric::flexible("Tranh Unit 5", "Miêu tả bức tranh đính kèm", 10.0, Some(0.5));
+    let flex_rubric = Rubric::flexible(
+        "Tranh Unit 5",
+        "Miêu tả bức tranh đính kèm",
+        10.0,
+        Some(0.5),
+    );
     let profile = PromptProfile::default();
     let images = vec![AssignmentImage {
         name: "tranh.png".into(),
@@ -517,4 +522,102 @@ async fn test_grade_video_with_images_sends_inline_data_and_normalizes_flexible(
     // 3.5 + 4.3 = 7.8 -> rounded to step 0.5 = 8.0
     assert_eq!(res.students[0].total_score, 8.0);
     assert_eq!(res.students[0].max_total_score, 10.0);
+}
+
+#[test]
+fn test_speech_mp3_args_and_audio_mime() {
+    let input = Path::new("speaking_test.mp4");
+    let out = Path::new("speech.mp3");
+
+    let enhanced = build_extract_speech_mp3_args_to(input, "compact", true, out);
+    assert!(enhanced.contains(&"-af".to_string()));
+    assert!(enhanced.contains(&"highpass=f=80,lowpass=f=8000,dynaudnorm".to_string()));
+    assert!(enhanced.contains(&"64k".to_string()));
+
+    let plain = build_extract_speech_mp3_args_to(input, "balanced", false, out);
+    assert!(!plain.contains(&"-af".to_string()));
+    assert!(plain.contains(&"128k".to_string()));
+
+    assert_eq!(detect_video_mime(Path::new("clip.mp3")), "audio/mp3");
+    assert_eq!(detect_video_mime(Path::new("clip.wav")), "audio/wav");
+    assert_eq!(detect_video_mime(Path::new("clip.m4a")), "audio/mp4");
+    assert_eq!(detect_video_mime(Path::new("clip.ogg")), "audio/ogg");
+    assert_eq!(detect_video_mime(Path::new("clip.flac")), "audio/flac");
+}
+
+#[tokio::test]
+async fn test_transcribe_audio_with_wiremock_and_normalize() {
+    let server = MockServer::start().await;
+
+    let response_json = json!({
+        "summary": "Thầy và trò trao đổi bài nói Unit 3.",
+        "detected_language": "English",
+        "speakers": [],
+        "segments": [
+            {
+                "start_time": "00:01",
+                "end_time": "00:04",
+                "speaker_id": "T1",
+                "speaker_label": "Thầy Nam",
+                "role": "Teacher",
+                "text": "Good morning, please introduce yourself.",
+                "translation": "",
+                "grammar_note": ""
+            },
+            {
+                "start_time": "00:05",
+                "end_time": "00:10",
+                "speaker_id": "S1",
+                "speaker_label": "Học sinh 1",
+                "role": "student",
+                "text": "My name is Hoa and I likes music.",
+                "translation": "",
+                "grammar_note": "Sửa: 'I like music'."
+            }
+        ]
+    });
+    let json_text = serde_json::to_string(&response_json).unwrap();
+
+    Mock::given(method("POST"))
+        .and(path(
+            "/v1beta/models/gemini-flash-lite-latest:generateContent",
+        ))
+        .and(query_param("key", "test-key"))
+        .and(wiremock::matchers::body_string_contains(
+            "\"mimeType\":\"audio/mp3\"",
+        ))
+        .and(wiremock::matchers::body_string_contains("GV: Thầy Nam"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "candidates": [{
+                "content": {
+                    "parts": [{ "text": json_text }]
+                }
+            }]
+        })))
+        .mount(&server)
+        .await;
+
+    let client = GeminiClient::with_base_url("test-key", server.uri()).unwrap();
+    let uploaded = UploadedFile {
+        name: "files/audio1".into(),
+        uri: "https://example.com/files/audio1".into(),
+        mime_type: "audio/mp3".into(),
+        state: "ACTIVE".into(),
+    };
+    let opts = TranscribeOptions {
+        speaker_hints: "GV: Thầy Nam".into(),
+        ..TranscribeOptions::default()
+    };
+
+    let result = client
+        .transcribe_audio(&uploaded, "gemini-flash-lite-latest", &opts, None)
+        .await
+        .unwrap();
+
+    assert_eq!(result.speakers.len(), 2);
+    assert_eq!(result.speakers[0].role, "teacher");
+    assert_eq!(result.speakers[0].label, "Thầy Nam");
+    assert_eq!(result.speakers[1].role, "student");
+    assert_eq!(result.segments.len(), 2);
+    assert_eq!(result.segments[1].grammar_note, "Sửa: 'I like music'.");
 }

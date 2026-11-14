@@ -8,6 +8,7 @@ import type {
   AssessmentSummary,
   AssignmentImage,
   FileInfo,
+  GenerateScriptResponse,
   GradeResponse,
   GradingAssignment,
   MediaOutput,
@@ -15,6 +16,7 @@ import type {
   PromptParts,
   PromptProfile,
   Rubric,
+  TranscriptResult,
 } from "./types";
 
 export const TASK_LABELS: Record<string, string> = {
@@ -138,6 +140,37 @@ export const api = {
 
   probeMediaDuration: (path: string) =>
     invoke<number | null>("probe_media_duration", { path }),
+
+  generateScript: (req: {
+    task_id: string;
+    api_key?: string;
+    input_path: string;
+    model: string;
+    mp3_preset: string;
+    enhance_speech: boolean;
+    keep_mp3: boolean;
+    interaction_mode: string;
+    speaker_hints: string;
+    verbatim_mode: string;
+    include_translation: boolean;
+    include_grammar_notes: boolean;
+    extra_instructions: string;
+    out_dir_override?: string;
+    out_path_override?: string;
+  }) => invoke<GenerateScriptResponse>("generate_script_cmd", { req }),
+
+  exportTranscriptFile: (params: {
+    transcript: TranscriptResult;
+    sourceName: string;
+    format: "md" | "txt" | "srt";
+    outPath: string;
+  }) =>
+    invoke<MediaOutput>("export_transcript_file", {
+      transcript: params.transcript,
+      sourceName: params.sourceName,
+      format: params.format,
+      outPath: params.outPath,
+    }),
 
   listRubrics: () => invoke<Rubric[]>("list_rubrics"),
   saveCustomRubric: (rubric: Rubric) =>
@@ -364,6 +397,24 @@ export const api = {
       title: "Lưu file Excel kết quả",
       defaultPath: defaultName,
       filters: [{ name: "Excel", extensions: ["xlsx"] }],
+    });
+    return selected;
+  },
+
+  saveScriptDialog: async (
+    defaultName: string,
+    format: "md" | "txt" | "srt"
+  ): Promise<string | null> => {
+    const filterName =
+      format === "srt"
+        ? "Phụ đề SubRip (.srt)"
+        : format === "txt"
+        ? "Văn bản thuần (.txt)"
+        : "Markdown Script (.md)";
+    const selected = await save({
+      title: "Lưu file Script",
+      defaultPath: defaultName,
+      filters: [{ name: filterName, extensions: [format] }],
     });
     return selected;
   },

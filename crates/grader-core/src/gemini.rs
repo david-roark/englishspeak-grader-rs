@@ -16,7 +16,10 @@ use tokio_util::sync::CancellationToken;
 use crate::error::{GraderError, Result};
 use crate::prompts::{build_prompt_parts_with_images, PromptProfile};
 use crate::rubrics::{AssignmentImage, Rubric};
-use crate::schemas::{assessment_result_gemini_schema, AssessmentResult};
+use crate::schemas::{
+    assessment_result_gemini_schema, transcript_result_gemini_schema, AssessmentResult,
+    TranscriptResult, TranscriptSpeaker,
+};
 
 pub const DEFAULT_BASE_URL: &str = "https://generativelanguage.googleapis.com";
 
@@ -201,6 +204,12 @@ pub fn detect_video_mime(path: &Path) -> &'static str {
         Some("3gp") | Some("3gpp") => "video/3gpp",
         Some("flv") => "video/x-flv",
         Some("mkv") => "video/x-matroska",
+        Some("mp3") => "audio/mp3",
+        Some("wav") => "audio/wav",
+        Some("m4a") => "audio/mp4",
+        Some("aac") => "audio/aac",
+        Some("ogg") => "audio/ogg",
+        Some("flac") => "audio/flac",
         _ => "video/mp4",
     }
 }
@@ -627,12 +636,6 @@ impl GeminiClient {
             valid_images.len(),
         );
 
-        let model_id = model.strip_prefix("models/").unwrap_or(model);
-        let url = format!(
-            "{}/v1beta/models/{}:generateContent?key={}",
-            self.base_url, model_id, self.api_key
-        );
-
         let temperature = if prompt_profile.temperature.is_finite() {
             prompt_profile.temperature.clamp(0.0, 1.0)
         } else {
@@ -673,6 +676,64 @@ impl GeminiClient {
             });
         }
 
+        let mut parsed: AssessmentResult = self.generate_json_content(model, body, cancel).await?;
+        rubric.normalize_assessment_result(&mut parsed);
+        Ok(parsed)
+    }
+
+    /// Tạo script hội thoại (timestamp, vai trò giáo viên/học sinh, tên riêng) từ file audio/video đã upload.
+    pub async fn transcribe_audio(
+        &self,
+        uploaded: &UploadedFile,
+        model: &str,
+        opts: &TranscribeOptions,
+        cancel: Option<&CancellationToken>,
+    ) -> Result<TranscriptResult> {
+        check_cancelled(cancel)?;
+        let (system_instruction, user_prompt) = build_transcription_prompt(opts);
+
+        let mut body = json!({
+            "contents": [{
+                "role": "user",
+                "parts": [
+                    {
+                        "fileData": {
+                            "fileUri": uploaded.uri,
+                            "mimeType": uploaded.mime_type
+                        }
+                    },
+                    { "text": user_prompt }
+                ]
+            }],
+            "generationConfig": {
+                "temperature": 0.15,
+                "responseMimeType": "application/json",
+                "responseJsonSchema": transcript_result_gemini_schema()
+            }
+        });
+        if !system_instruction.is_empty() {
+            body["systemInstruction"] = json!({
+                "parts": [{ "text": system_instruction }]
+            });
+        }
+
+        let mut parsed: TranscriptResult = self.generate_json_content(model, body, cancel).await?;
+        normalize_transcript_result(&mut parsed);
+        Ok(parsed)
+    }
+
+    async fn generate_json_content<T: serde::de::DeserializeOwned>(
+        &self,
+        model: &str,
+        body: Value,
+        cancel: Option<&CancellationToken>,
+    ) -> Result<T> {
+        let model_id = model.strip_prefix("models/").unwrap_or(model);
+        let url = format!(
+            "{}/v1beta/models/{}:generateContent?key={}",
+            self.base_url, model_id, self.api_key
+        );
+
         let req_fut = self
             .http
             .post(&url)
@@ -712,14 +773,12 @@ impl GeminiClient {
         }
 
         let cleaned = strip_json_fence(text.trim());
-        let mut parsed = serde_json::from_str::<AssessmentResult>(cleaned).map_err(|e| {
+        serde_json::from_str::<T>(cleaned).map_err(|e| {
             let preview: String = cleaned.chars().take(500).collect();
             GraderError::Gemini(format!(
                 "Không đọc được kết quả JSON từ Gemini: {e}\n---\n{preview}"
             ))
-        })?;
-        rubric.normalize_assessment_result(&mut parsed);
-        Ok(parsed)
+        })
     }
 
     /// Xóa file đã upload khỏi Gemini (bỏ qua lỗi).
@@ -883,6 +942,178 @@ impl GeminiFileResponse {
                 self.mime_type
             },
             state: self.state,
+        }
+    }
+}
+
+/// Tùy chọn tạo script hội thoại/bài nói từ audio bằng AI.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TranscribeOptions {
+    pub interaction_mode: String,
+    pub speaker_hints: String,
+    pub verbatim_mode: String,
+    pub include_translation: bool,
+    pub include_grammar_notes: bool,
+    pub extra_instructions: String,
+}
+
+impl Default for TranscribeOptions {
+    fn default() -> Self {
+        Self {
+            interaction_mode: "auto".to_string(),
+            speaker_hints: String::new(),
+            verbatim_mode: "verbatim".to_string(),
+            include_translation: false,
+            include_grammar_notes: true,
+            extra_instructions: String::new(),
+        }
+    }
+}
+
+/// Dựng `(system_instruction, user_prompt)` cho tác vụ chép lời kèm timestamp & phân vai người nói.
+pub fn build_transcription_prompt(opts: &TranscribeOptions) -> (String, String) {
+    let system_instruction = "Bạn là chuyên gia phiên âm (transcription) và phân tích ngữ âm lớp học tiếng Anh. \
+Hãy nghe kỹ toàn bộ file âm thanh từ đầu đến cuối, tách chính xác từng lượt lời theo mốc thời gian (MM:SS), \
+phân biệt đúng vai trò người nói (Giáo viên / Học sinh) và nhận diện tên riêng nếu được nhắc đến. \
+Luôn trả về đúng định dạng JSON theo schema đã cấu hình, tuyệt đối không bịa đặt lời thoại."
+        .to_string();
+
+    let mode_desc = match opts.interaction_mode.trim().to_ascii_lowercase().as_str() {
+        "monologue" => "Bài nói độc thoại / thuyết trình (thường có 1 học sinh chính, có thể có lời mở đầu của giáo viên).",
+        "interview" => "Phỏng vấn Hỏi–Đáp (1 Giáo viên / Giám khảo hỏi và 1–2 Học sinh trả lời).",
+        "pair" => "Hội thoại theo cặp (2 học sinh trao đổi qua lại, có thể có phần dẫn dắt ngắn của giáo viên).",
+        "group" => "Thảo luận nhóm nhiều người (từ 3 học sinh trở lên, hoặc có giáo viên điều phối).",
+        _ => "Tự động phân tích theo âm thanh thực tế (có thể là độc thoại, hỏi–đáp GV–HS, đối thoại cặp hoặc thảo luận nhóm).",
+    };
+
+    let verbatim_rule = if opts.verbatim_mode.trim().eq_ignore_ascii_case("clean") {
+        "Chế độ LÀM SẠCH: Lược bỏ các từ đệm ngập ngừng không mang nghĩa (um, uh, er) và lặp từ vô ý, nhưng giữ nguyên ý và cấu trúc câu người nói sử dụng."
+    } else {
+        "Chế độ NGUYÊN TRẠNG (Verbatim cho giáo viên chấm bài): Ghi chép chính xác nguyên văn lời người nói, BAO GỒM cả lỗi ngữ pháp, chia sai thì, thiếu từ hoặc ngập ngừng (vd: um, uh) để giáo viên đánh giá đúng năng lực thật."
+    };
+
+    let translation_rule = if opts.include_translation {
+        "Điền bản dịch tiếng Việt ngắn gọn, tự nhiên cho từng lượt lời vào trường `translation`."
+    } else {
+        "Để trống trường `translation` (chuỗi rỗng `\"\"`) cho tất cả các lượt lời."
+    };
+
+    let grammar_rule = if opts.include_grammar_notes {
+        "Với các lượt lời của `student` có lỗi ngữ pháp, dùng từ chưa tự nhiên hoặc sai cấu trúc câu, hãy điền gợi ý sửa ngắn gọn (ví dụ: \"Nên dùng: 'Yesterday I went...' thay vì 'I go'\") vào trường `grammar_note`. Nếu câu đã chuẩn hoặc là lời của giáo viên thì để `\"\"`."
+    } else {
+        "Để trống trường `grammar_note` (chuỗi rỗng `\"\"`) cho tất cả các lượt lời."
+    };
+
+    let mut prompt_sections = vec![
+        format!("**Bối cảnh cuộc hội thoại:** {mode_desc}"),
+        format!("**Quy tắc chép lời:** {verbatim_rule}"),
+        "**Quy tắc gắn nhãn Vai trò (`role`) & Tên (`speaker_label`):**\n\
+- `role` chỉ nhận một trong 3 giá trị: `\"teacher\"`, `\"student\"`, hoặc `\"other\"`.\n\
+- Lắng nghe kỹ phần tự giới thiệu (\"Hello teacher, my name is...\", \"I'm...\") hoặc khi giáo viên gọi tên học sinh để gán tên thật vào `speaker_label` và đặt `name_confident = true`.\n\
+- Nếu không nghe được tên thật, đặt nhãn nhất quán như `\"Giáo viên\"`, `\"Học sinh 1\"`, `\"Học sinh 2\"` và đặt `name_confident = false`.\n\
+- Dùng `speaker_id` nhất quán (vd: `\"T1\"`, `\"S1\"`, `\"S2\"`) giữa mảng `speakers` và từng phần tử trong `segments`."
+            .to_string(),
+        "**Quy tắc Timestamp:**\n\
+- Ghi rõ `start_time` và `end_time` theo định dạng `MM:SS` (hoặc `HH:MM:SS` nếu dài hơn 1 giờ) khớp sát với thời gian trong audio.\n\
+- Tách lượt lời hợp lý theo từng câu/lượt trao đổi để giáo viên dễ bấm tua nghe lại từng đoạn."
+            .to_string(),
+        format!("**Dịch nghĩa (`translation`):** {translation_rule}"),
+        format!("**Gợi ý sửa lỗi (`grammar_note`):** {grammar_rule}"),
+    ];
+
+    if !opts.speaker_hints.trim().is_empty() {
+        prompt_sections.push(format!(
+            "**Gợi ý người tham gia do giáo viên cung cấp (ưu tiên đối chiếu):**\n{}",
+            opts.speaker_hints.trim()
+        ));
+    }
+
+    if !opts.extra_instructions.trim().is_empty() {
+        prompt_sections.push(format!(
+            "**Yêu cầu bổ sung từ giáo viên:**\n{}",
+            opts.extra_instructions.trim()
+        ));
+    }
+
+    (system_instruction, prompt_sections.join("\n\n"))
+}
+
+fn normalize_transcript_role(role: &str) -> String {
+    match role.trim().to_ascii_lowercase().as_str() {
+        "teacher" | "giáo viên" | "gv" | "examiner" | "giám khảo" => "teacher".to_string(),
+        "student" | "học sinh" | "hs" | "learner" | "candidate" => "student".to_string(),
+        _ => "other".to_string(),
+    }
+}
+
+fn default_label_for_role(role: &str, index: usize) -> String {
+    match role {
+        "teacher" => "Giáo viên".to_string(),
+        "student" => format!("Học sinh {index}"),
+        _ => format!("Người nói {index}"),
+    }
+}
+
+/// Chuẩn hóa dữ liệu `TranscriptResult` trả về từ Gemini để đảm bảo nhất quán speaker & role.
+pub fn normalize_transcript_result(result: &mut TranscriptResult) {
+    for sp in &mut result.speakers {
+        sp.role = normalize_transcript_role(&sp.role);
+        sp.id = sp.id.trim().to_string();
+        sp.label = sp.label.trim().to_string();
+    }
+
+    for (idx, seg) in result.segments.iter_mut().enumerate() {
+        seg.role = normalize_transcript_role(&seg.role);
+        seg.speaker_id = seg.speaker_id.trim().to_string();
+        seg.speaker_label = seg.speaker_label.trim().to_string();
+        seg.start_time = seg.start_time.trim().to_string();
+        seg.end_time = seg.end_time.trim().to_string();
+        seg.text = seg.text.trim().to_string();
+
+        if seg.speaker_id.is_empty() {
+            if let Some(matched) = result
+                .speakers
+                .iter()
+                .find(|s| !seg.speaker_label.is_empty() && s.label == seg.speaker_label)
+            {
+                seg.speaker_id = matched.id.clone();
+            } else {
+                seg.speaker_id = format!("SPK_{}", idx + 1);
+            }
+        }
+
+        if let Some(matched) = result.speakers.iter().find(|s| s.id == seg.speaker_id) {
+            if seg.speaker_label.is_empty() {
+                seg.speaker_label = matched.label.clone();
+            }
+            if seg.role == "other" && matched.role != "other" {
+                seg.role = matched.role.clone();
+            }
+        }
+
+        if seg.speaker_label.is_empty() {
+            seg.speaker_label = default_label_for_role(&seg.role, idx + 1);
+        }
+    }
+
+    // Bảo đảm mọi speaker xuất hiện trong segments đều có mặt trong `result.speakers`
+    for seg in &result.segments {
+        if !result.speakers.iter().any(|s| s.id == seg.speaker_id) {
+            result.speakers.push(TranscriptSpeaker {
+                id: seg.speaker_id.clone(),
+                label: seg.speaker_label.clone(),
+                role: seg.role.clone(),
+                name_confident: false,
+            });
+        }
+    }
+
+    for (idx, sp) in result.speakers.iter_mut().enumerate() {
+        if sp.id.is_empty() {
+            sp.id = format!("SPK_{}", idx + 1);
+        }
+        if sp.label.is_empty() {
+            sp.label = default_label_for_role(&sp.role, idx + 1);
         }
     }
 }

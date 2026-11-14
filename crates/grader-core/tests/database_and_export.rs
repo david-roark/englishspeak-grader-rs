@@ -332,8 +332,5 @@ fn test_grading_assignment_crud_with_images() {
 
     // Delete
     db.delete_grading_assignment("lop8a_unit5").unwrap();
-    assert!(db
-        .get_grading_assignment("lop8a_unit5")
-        .unwrap()
-        .is_none());
+    assert!(db.get_grading_assignment("lop8a_unit5").unwrap().is_none());
 }

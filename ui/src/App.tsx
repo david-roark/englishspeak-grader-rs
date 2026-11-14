@@ -308,6 +308,8 @@ export function App() {
 
         {tab === "media" && (
           <MediaToolsPage
+            apiKeyInput={apiKeyInput}
+            model={selectedModel}
             videoPresets={bootstrap.video_presets}
             mp3Presets={bootstrap.mp3_presets}
             ffmpegAvailable={Boolean(bootstrap.ffmpeg_path)}

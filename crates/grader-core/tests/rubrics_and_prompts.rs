@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 
+use grader_core::gemini::{build_transcription_prompt, TranscribeOptions};
 use grader_core::prompts::{
     build_grading_prompt, build_prompt_parts, build_prompt_parts_with_images, merge_with_default,
     PromptProfile,
@@ -9,7 +10,9 @@ use grader_core::rubrics::{
     AssignmentImage, Criterion, CriterionLevel, Rubric,
 };
 use grader_core::schemas::{
-    assessment_result_gemini_schema, AssessmentResult, CriterionScore, Evidence, StudentAssessment,
+    assessment_result_gemini_schema, format_transcript_markdown, format_transcript_srt,
+    format_transcript_text, transcript_result_gemini_schema, AssessmentResult, CriterionScore,
+    Evidence, StudentAssessment, TranscriptResult, TranscriptSegment, TranscriptSpeaker,
 };
 
 fn sample_result() -> AssessmentResult {
@@ -370,10 +373,7 @@ fn test_encode_base64_and_assignment_image_from_file() {
         detect_image_mime(std::path::Path::new("photo.jpg")),
         Some("image/jpeg")
     );
-    assert_eq!(
-        detect_image_mime(std::path::Path::new("notes.txt")),
-        None
-    );
+    assert_eq!(detect_image_mime(std::path::Path::new("notes.txt")), None);
 
     let dir = tempfile::TempDir::new().unwrap();
     let img_path = dir.path().join("exam.png");
@@ -387,4 +387,99 @@ fn test_encode_base64_and_assignment_image_from_file() {
     std::fs::write(&bad_path, b"text").unwrap();
     assert!(AssignmentImage::from_file(&bad_path).is_err());
     assert!(AssignmentImage::from_file(&dir.path().join("missing.png")).is_err());
+}
+
+#[test]
+fn test_transcript_schema_and_formatters() {
+    let schema = transcript_result_gemini_schema();
+    let serialized = serde_json::to_string(&schema).unwrap();
+    for forbidden in [
+        "\"$ref\"",
+        "\"$defs\"",
+        "\"definitions\"",
+        "\"$schema\"",
+        "\"title\"",
+        "\"format\"",
+        "\"default\"",
+    ] {
+        assert!(
+            !serialized.contains(forbidden),
+            "Transcript schema must not contain {forbidden}: {serialized}"
+        );
+    }
+
+    let sample = TranscriptResult {
+        summary: "Phỏng vấn giữa cô Lan và học sinh Minh về sở thích.".into(),
+        detected_language: "English".into(),
+        speakers: vec![
+            TranscriptSpeaker {
+                id: "T1".into(),
+                label: "Cô Lan".into(),
+                role: "teacher".into(),
+                name_confident: true,
+            },
+            TranscriptSpeaker {
+                id: "S1".into(),
+                label: "Minh".into(),
+                role: "student".into(),
+                name_confident: true,
+            },
+        ],
+        segments: vec![
+            TranscriptSegment {
+                start_time: "00:02".into(),
+                end_time: "00:06".into(),
+                speaker_id: "T1".into(),
+                speaker_label: "Cô Lan".into(),
+                role: "teacher".into(),
+                text: "Hello Minh, what do you do in your free time?".into(),
+                translation: "Chào Minh, em làm gì vào thời gian rảnh?".into(),
+                grammar_note: "".into(),
+            },
+            TranscriptSegment {
+                start_time: "00:07".into(),
+                end_time: "".into(),
+                speaker_id: "S1".into(),
+                speaker_label: "Minh".into(),
+                role: "student".into(),
+                text: "I go to library yesterday and read books.".into(),
+                translation: "".into(),
+                grammar_note: "Nên dùng thì quá khứ: 'went to the library'.".into(),
+            },
+        ],
+    };
+
+    let md = format_transcript_markdown(&sample, "unit5.mp4");
+    assert!(md.contains("# Script bài nói: unit5.mp4"));
+    assert!(md.contains("**[00:02 - 00:06] [Giáo viên] Cô Lan:**"));
+    assert!(md.contains("*Dịch:* Chào Minh"));
+    assert!(md.contains("*Gợi ý sửa:* Nên dùng thì quá khứ"));
+
+    let txt = format_transcript_text(&sample, "unit5.mp4");
+    assert!(txt.contains("SCRIPT BÀI NÓI: unit5.mp4"));
+    assert!(txt.contains("[00:02 - 00:06] [Giáo viên] Cô Lan:"));
+
+    let srt = format_transcript_srt(&sample);
+    assert!(srt.contains("1\n00:00:02,000 --> 00:00:06,000\n[Cô Lan]: Hello Minh"));
+    assert!(srt.contains("2\n00:00:07,000 --> 00:00:10,000\n[Minh]: I go to library"));
+}
+
+#[test]
+fn test_build_transcription_prompt_options() {
+    let opts = TranscribeOptions {
+        interaction_mode: "interview".into(),
+        speaker_hints: "GV: Cô Mai; HS: Tuấn".into(),
+        verbatim_mode: "clean".into(),
+        include_translation: true,
+        include_grammar_notes: false,
+        extra_instructions: "Ghi rõ các từ phát âm sai.".into(),
+    };
+    let (sys, usr) = build_transcription_prompt(&opts);
+    assert!(sys.contains("chuyên gia phiên âm"));
+    assert!(usr.contains("Phỏng vấn Hỏi–Đáp"));
+    assert!(usr.contains("LÀM SẠCH"));
+    assert!(usr.contains("GV: Cô Mai; HS: Tuấn"));
+    assert!(usr.contains("Ghi rõ các từ phát âm sai."));
+    assert!(usr.contains("Điền bản dịch tiếng Việt ngắn gọn"));
+    assert!(usr.contains("Để trống trường `grammar_note`"));
 }

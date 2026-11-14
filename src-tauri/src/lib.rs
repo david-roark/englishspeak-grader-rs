@@ -23,6 +23,8 @@ pub fn run() {
             commands::extract_mp3_cmd,
             commands::trim_media_cmd,
             commands::mute_video_cmd,
+            commands::generate_script_cmd,
+            commands::export_transcript_file,
             commands::list_rubrics,
             commands::save_custom_rubric,
             commands::clone_rubric,

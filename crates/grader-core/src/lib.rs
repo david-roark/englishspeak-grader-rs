@@ -11,14 +11,15 @@ pub mod schemas;
 pub use database::{AssessmentDetail, AssessmentSummary, Database, NewAssessment, StudentRecord};
 pub use error::{GraderError, Result};
 pub use gemini::{
-    CachedUpload, GeminiClient, MediaResolution, UploadCache, UploadProgress, UploadedFile,
-    DEFAULT_MODEL, FALLBACK_MODELS, UPLOAD_TTL_SECS,
+    build_transcription_prompt, normalize_transcript_result, CachedUpload, GeminiClient,
+    MediaResolution, TranscribeOptions, UploadCache, UploadProgress, UploadedFile, DEFAULT_MODEL,
+    FALLBACK_MODELS, UPLOAD_TTL_SECS,
 };
 pub use media::{
-    compress_video, compress_video_to, extract_mp3, extract_mp3_to, get_mp3_preset,
-    get_video_preset, mp3_presets, mute_video_to, probe_duration_secs, resolve_ffmpeg,
-    trim_media_to, video_presets, MediaProgress, Mp3Preset, VideoPreset, DEFAULT_MP3_PRESET,
-    DEFAULT_VIDEO_PRESET,
+    build_extract_speech_mp3_args_to, compress_video, compress_video_to, extract_mp3,
+    extract_mp3_to, extract_speech_mp3_to, get_mp3_preset, get_video_preset, mp3_presets,
+    mute_video_to, probe_duration_secs, resolve_ffmpeg, trim_media_to, video_presets,
+    MediaProgress, Mp3Preset, VideoPreset, DEFAULT_MP3_PRESET, DEFAULT_VIDEO_PRESET,
 };
 pub use paths::AppPaths;
 pub use prompts::{
@@ -30,5 +31,7 @@ pub use rubrics::{
     get_builtin_rubric, AssignmentImage, Criterion, CriterionLevel, GradingAssignment, Rubric,
 };
 pub use schemas::{
-    assessment_result_gemini_schema, AssessmentResult, CriterionScore, Evidence, StudentAssessment,
+    assessment_result_gemini_schema, format_transcript_markdown, format_transcript_srt,
+    format_transcript_text, transcript_result_gemini_schema, AssessmentResult, CriterionScore,
+    Evidence, StudentAssessment, TranscriptResult, TranscriptSegment, TranscriptSpeaker,
 };

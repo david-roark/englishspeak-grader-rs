@@ -198,3 +198,36 @@ export interface ProgressPayload {
   stage: string;
   percent: number | null;
 }
+
+export interface TranscriptSpeaker {
+  id: string;
+  label: string;
+  role: "teacher" | "student" | "other" | string;
+  name_confident: boolean;
+}
+
+export interface TranscriptSegment {
+  start_time: string;
+  end_time: string;
+  speaker_id: string;
+  speaker_label: string;
+  role: "teacher" | "student" | "other" | string;
+  text: string;
+  translation: string;
+  grammar_note: string;
+}
+
+export interface TranscriptResult {
+  summary: string;
+  detected_language: string;
+  speakers: TranscriptSpeaker[];
+  segments: TranscriptSegment[];
+}
+
+export interface GenerateScriptResponse {
+  transcript: TranscriptResult;
+  source_name: string;
+  script_output: MediaOutput;
+  mp3_output: MediaOutput | null;
+  reused_upload_cache: boolean;
+}

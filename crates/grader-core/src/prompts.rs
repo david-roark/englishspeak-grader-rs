@@ -230,7 +230,8 @@ pub fn build_prompt_parts_with_images(
         let mut line = if is_flexible && rule.contains("không tự thêm/bớt tiêu chí") {
             "Chấm điểm bám sát yêu cầu đề bài; tách các đầu mục vào `criteria` theo đúng đề bài hoặc chia 3–4 tiêu chí hợp lý.".to_string()
         } else if is_flexible && rule.contains("GIỮ NGUYÊN như trong rubric") {
-            "Đặt tên các tiêu chí trong kết quả rõ ràng, khớp với các đầu mục yêu cầu của đề bài.".to_string()
+            "Đặt tên các tiêu chí trong kết quả rõ ràng, khớp với các đầu mục yêu cầu của đề bài."
+                .to_string()
         } else {
             rule.clone()
         };
