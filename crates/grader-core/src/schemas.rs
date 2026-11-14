@@ -363,28 +363,134 @@ pub fn format_transcript_srt_with_mode(result: &TranscriptResult, content_mode: 
     }
 }
 
-fn escape_ass_text(raw: &str) -> String {
-    raw.trim()
-        .replace('{', "(")
-        .replace('}', ")")
-        .replace("\r\n", "\\N")
-        .replace(['\n', '\r'], "\\N")
+fn is_emoji_or_icon_char(ch: char) -> bool {
+    let cp = ch as u32;
+    matches!(
+        cp,
+        0x2300..=0x23FF // Miscellaneous Technical (e.g. ⏰, ⏱)
+            | 0x2600..=0x27BF // Misc Symbols & Dingbats (e.g. ⚠️, ✅, ✨, ⭐)
+            | 0x2B00..=0x2BFF // Misc Symbols and Arrows
+            | 0x1F300..=0x1FAFF // Emoji blocks (🎓, 💡, 🎤, 💬, 🌐, etc.)
+    )
 }
 
-/// Xuất script sang định dạng ASS (`.ass`) có tô màu vai trò Giáo viên / Học sinh để đốt lên video.
-pub fn format_transcript_ass(result: &TranscriptResult, content_mode: &str) -> String {
-    let (include_translation, include_grammar) = subtitle_content_flags(content_mode);
+fn escape_ass_text(raw: &str) -> String {
+    let sanitized = raw
+        .trim()
+        .replace('{', "(")
+        .replace('}', ")")
+        .replace("\r\n", "\n")
+        .replace('\r', "\n");
+
+    let mut out = String::with_capacity(sanitized.len() + 16);
+    let mut in_emoji_run = false;
+
+    for ch in sanitized.chars() {
+        // Strip variation selectors so libass does not render missing-glyph tofu boxes.
+        if matches!(ch, '\u{FE0E}' | '\u{FE0F}') {
+            continue;
+        }
+        if ch == '\n' {
+            if in_emoji_run {
+                out.push_str(r"{\fn}");
+                in_emoji_run = false;
+            }
+            out.push_str("\\N");
+            continue;
+        }
+
+        if is_emoji_or_icon_char(ch) {
+            if !in_emoji_run {
+                out.push_str(r"{\fnNoto Emoji}");
+                in_emoji_run = true;
+            }
+            out.push(ch);
+        } else {
+            if in_emoji_run {
+                out.push_str(r"{\fn}");
+                in_emoji_run = false;
+            }
+            out.push(ch);
+        }
+    }
+
+    if in_emoji_run {
+        out.push_str(r"{\fn}");
+    }
+    out
+}
+
+/// Tùy chọn định dạng phụ đề ASS (font chữ, chế độ nội dung và khung hình tham chiếu).
+#[derive(Debug, Clone)]
+pub struct AssSubtitleOptions {
+    pub content_mode: String,
+    pub font_name: String,
+    pub play_res_x: u32,
+    pub play_res_y: u32,
+}
+
+impl Default for AssSubtitleOptions {
+    fn default() -> Self {
+        Self {
+            content_mode: "all".to_string(),
+            font_name: "Be Vietnam Pro".to_string(),
+            play_res_x: 1280,
+            play_res_y: 720,
+        }
+    }
+}
+
+/// Xuất script sang định dạng ASS (`.ass`) với font, kích thước khung hình và màu vai trò tùy chỉnh.
+pub fn format_transcript_ass_with_options(
+    result: &TranscriptResult,
+    opts: &AssSubtitleOptions,
+) -> String {
+    let (include_translation, include_grammar) = subtitle_content_flags(&opts.content_mode);
+    let play_res_x = opts.play_res_x.max(320);
+    let play_res_y = opts.play_res_y.max(320);
+    let clean_font: String = opts
+        .font_name
+        .trim()
+        .chars()
+        .filter(|c| !matches!(c, ',' | '\r' | '\n' | '{' | '}'))
+        .collect();
+    let font_name = if clean_font.is_empty() {
+        "Be Vietnam Pro".to_string()
+    } else {
+        clean_font
+    };
+
+    let (primary_fs, margin_h, margin_v) = if play_res_y > play_res_x {
+        // Portrait video (e.g. 720x1280): keep text compact so lines do not wrap excessively.
+        let pfs = ((play_res_x as f64) * 34.0 / 720.0)
+            .round()
+            .clamp(24.0, 52.0) as u32;
+        let mh = ((play_res_x as f64) * 32.0 / 720.0).round().max(20.0) as u32;
+        let mv = ((play_res_y as f64) * 48.0 / 1280.0).round().max(24.0) as u32;
+        (pfs, mh, mv)
+    } else {
+        let pfs = ((play_res_y as f64) * 28.0 / 720.0)
+            .round()
+            .clamp(22.0, 52.0) as u32;
+        let mh = ((play_res_x as f64) * 36.0 / 1280.0).round().max(20.0) as u32;
+        let mv = ((play_res_y as f64) * 32.0 / 720.0).round().max(20.0) as u32;
+        (pfs, mh, mv)
+    };
+    let secondary_fs = ((primary_fs as f64) * 23.0 / 28.0).round().max(18.0) as u32;
+
     let mut lines = vec![
         "[Script Info]".to_string(),
         "ScriptType: v4.00+".to_string(),
-        "PlayResX: 1280".to_string(),
-        "PlayResY: 720".to_string(),
+        format!("PlayResX: {play_res_x}"),
+        format!("PlayResY: {play_res_y}"),
         "WrapStyle: 0".to_string(),
         "ScaledBorderAndShadow: yes".to_string(),
         String::new(),
         "[V4+ Styles]".to_string(),
         "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding".to_string(),
-        "Style: Default,DejaVu Sans,28,&H00FFFFFF,&H000000FF,&H00000000,&H80000000,0,0,0,0,100,100,0,0,1,2,1,2,30,30,28,1".to_string(),
+        format!(
+            "Style: Default,{font_name},{primary_fs},&H00FFFFFF,&H000000FF,&H00121212,&H78000000,0,0,0,0,100,100,0,0,1,2.4,1.2,2,{margin_h},{margin_h},{margin_v},1"
+        ),
         String::new(),
         "[Events]".to_string(),
         "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text".to_string(),
@@ -402,13 +508,13 @@ pub fn format_transcript_ass(result: &TranscriptResult, content_mode: &str) -> S
         let mut dialogue_text = format!("{speaker_tag} {}", escape_ass_text(&seg.text));
         if include_translation && !seg.translation.trim().is_empty() {
             dialogue_text.push_str(&format!(
-                "\\N{{\\fs23\\c&HE8E8E8&}}Dịch: {}",
+                "\\N{{\\fs{secondary_fs}\\c&HE8E8E8&}}Dịch: {}",
                 escape_ass_text(&seg.translation)
             ));
         }
         if include_grammar && !seg.grammar_note.trim().is_empty() {
             dialogue_text.push_str(&format!(
-                "\\N{{\\fs23\\c&H80D8FF&}}Sửa: {}",
+                "\\N{{\\fs{secondary_fs}\\c&H80D8FF&}}Sửa: {}",
                 escape_ass_text(&seg.grammar_note)
             ));
         }
@@ -422,6 +528,17 @@ pub fn format_transcript_ass(result: &TranscriptResult, content_mode: &str) -> S
     }
 
     lines.join("\n") + "\n"
+}
+
+/// Xuất script sang định dạng ASS (`.ass`) có tô màu vai trò Giáo viên / Học sinh để đốt lên video.
+pub fn format_transcript_ass(result: &TranscriptResult, content_mode: &str) -> String {
+    format_transcript_ass_with_options(
+        result,
+        &AssSubtitleOptions {
+            content_mode: content_mode.to_string(),
+            ..Default::default()
+        },
+    )
 }
 
 fn inline_and_clean_schema(node: &Value, defs: &Map<String, Value>) -> Value {

@@ -6,10 +6,11 @@ use grader_core::gemini::{
     GeminiClient, MediaResolution, TranscribeOptions, UploadCache, UploadedFile, FALLBACK_MODELS,
 };
 use grader_core::media::{
-    build_compress_video_args, build_embed_subtitles_video_args_to, build_extract_mp3_args,
+    build_compress_video_args, build_embed_subtitles_video_args_to,
+    build_embed_subtitles_video_args_with_fonts_to, build_extract_mp3_args,
     build_extract_speech_mp3_args_to, build_mute_video_args_to, build_trim_media_args_to,
     compress_video, escape_ffmpeg_filter_path, extract_mp3, parse_duration_from_stderr,
-    resolve_ffmpeg, DEFAULT_MP3_PRESET, DEFAULT_VIDEO_PRESET,
+    parse_video_dimensions_from_stderr, resolve_ffmpeg, DEFAULT_MP3_PRESET, DEFAULT_VIDEO_PRESET,
 };
 use grader_core::prompts::PromptProfile;
 use grader_core::rubrics::{get_builtin_rubric, AssignmentImage, Rubric};
@@ -677,4 +678,52 @@ fn test_embed_subtitles_video_args_and_filter_escape() {
         soft_webm_args.last().map(String::as_str),
         Some("/tmp/out_webm_soft.mp4")
     );
+}
+
+#[test]
+fn test_embed_subtitles_args_with_fontsdir_and_dimension_parser() {
+    let args = build_embed_subtitles_video_args_with_fonts_to(
+        Path::new("/tmp/in.mp4"),
+        Path::new("/tmp/sub/demo:1.ass"),
+        true,
+        Some(Path::new("/app/public/fonts:v2")),
+        Path::new("/tmp/out_fonts.mp4"),
+    );
+    let vf_idx = args
+        .iter()
+        .position(|a| a == "-vf")
+        .expect("-vf filter missing");
+    assert_eq!(
+        args[vf_idx + 1],
+        r"ass=/tmp/sub/demo\:1.ass:fontsdir=/app/public/fonts\:v2"
+    );
+
+    let soft_args = build_embed_subtitles_video_args_with_fonts_to(
+        Path::new("/tmp/in.mp4"),
+        Path::new("/tmp/sub/demo.srt"),
+        false,
+        Some(Path::new("/app/public/fonts")),
+        Path::new("/tmp/out_soft_fonts.mp4"),
+    );
+    assert!(!soft_args.iter().any(|a| a.contains("fontsdir=")));
+
+    let landscape_stderr = "  Stream #0:0[0x1](und): Video: h264 (High), yuv420p(tv, bt709), 1920x1080 [SAR 1:1 DAR 16:9], 30 fps\n  Stream #0:1: Audio: aac";
+    assert_eq!(
+        parse_video_dimensions_from_stderr(landscape_stderr),
+        Some((1920, 1080))
+    );
+
+    let portrait_stderr = "  Stream #0:0[0x1]: Video: h264, yuv420p, 720x1280, 1871 kb/s, 30 fps";
+    assert_eq!(
+        parse_video_dimensions_from_stderr(portrait_stderr),
+        Some((720, 1280))
+    );
+
+    let rotated_phone_stderr = "  Stream #0:0[0x1]: Video: h264, yuv420p, 1920x1080, 30 fps\n    Side data:\n      displaymatrix: rotation of -90.00 degrees\n  Stream #0:1: Audio: aac";
+    assert_eq!(
+        parse_video_dimensions_from_stderr(rotated_phone_stderr),
+        Some((1080, 1920))
+    );
+
+    assert_eq!(parse_video_dimensions_from_stderr("Audio only"), None);
 }

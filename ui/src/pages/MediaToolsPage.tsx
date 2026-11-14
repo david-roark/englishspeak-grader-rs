@@ -242,6 +242,9 @@ export function MediaToolsPage({
   const [subtitleContentMode, setSubtitleContentMode] = useState<
     "all" | "with_grammar" | "bilingual" | "text_only"
   >("all");
+  const [subtitleFont, setSubtitleFont] = useState<
+    "Be Vietnam Pro" | "Noto Sans" | "Lexend"
+  >("Be Vietnam Pro");
   const [subtitledVideoOutput, setSubtitledVideoOutput] =
     useState<MediaOutput | null>(null);
   const [sessionHistory, setSessionHistory] = useState<SessionHistoryItem[]>([]);
@@ -550,6 +553,7 @@ export function MediaToolsPage({
         transcript: scriptResult.transcript,
         burn_mode: burnMode,
         content_mode: subtitleContentMode,
+        font_name: subtitleFont,
         out_dir_override: overrides.outDirOverride,
         out_path_override: mp4PathOverride,
       });
@@ -866,9 +870,14 @@ export function MediaToolsPage({
             )}
 
             {scriptResult && (
-              <div className="rounded-lg border border-slate-800 bg-slate-900 px-3 py-2.5 text-white shadow-inner">
+              <div
+                className="rounded-lg border border-slate-800 bg-slate-900 px-3 py-2.5 text-white shadow-inner"
+                style={{
+                  fontFamily: `"${subtitleFont}", "Noto Emoji", sans-serif`,
+                }}
+              >
                 <div className="flex items-center justify-between gap-2 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
-                  <span>Xem trước phụ đề theo Player</span>
+                  <span>Xem trước phụ đề · {subtitleFont}</span>
                   <span className="font-mono text-indigo-300">
                     {formatDuration(playerCurrentTime)}
                   </span>
@@ -1470,60 +1479,96 @@ export function MediaToolsPage({
                       Dùng trực tiếp nội dung bạn vừa chỉnh sửa bên dưới
                     </span>
                   </div>
-                  <div className="mt-2.5 grid gap-2.5 sm:grid-cols-12">
-                    <div className="sm:col-span-5">
-                      <label className="block text-[11px] font-semibold text-slate-700">
-                        Kiểu ghép phụ đề
-                      </label>
-                      <select
-                        value={burnMode}
-                        onChange={(e) =>
-                          setBurnMode(
-                            e.target.value === "softsub" ? "softsub" : "hardsub"
-                          )
-                        }
-                        aria-label="Kiểu ghép phụ đề vào video"
-                        className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-800 focus:border-indigo-400 focus:outline-none"
-                      >
-                        <option value="hardsub">
-                          In cứng lên hình (Hardsub — Mọi thiết bị/Zalo đều hiện &amp; có màu vai trò)
-                        </option>
-                        <option value="softsub">
-                          Phụ đề mềm (Softsub mov_text — Xuất cực nhanh, bật/tắt được)
-                        </option>
-                      </select>
+                  <div className="mt-2.5 space-y-2.5">
+                    <div className="grid gap-2.5 sm:grid-cols-3">
+                      <div>
+                        <label className="block text-[11px] font-semibold text-slate-700">
+                          Kiểu ghép phụ đề
+                        </label>
+                        <select
+                          value={burnMode}
+                          onChange={(e) =>
+                            setBurnMode(
+                              e.target.value === "softsub" ? "softsub" : "hardsub"
+                            )
+                          }
+                          aria-label="Kiểu ghép phụ đề vào video"
+                          className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-800 focus:border-indigo-400 focus:outline-none"
+                        >
+                          <option value="hardsub">
+                            In cứng (Hardsub — Mọi thiết bị/Zalo &amp; có màu vai trò)
+                          </option>
+                          <option value="softsub">
+                            Phụ đề mềm (Softsub mov_text — Xuất cực nhanh)
+                          </option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-[11px] font-semibold text-slate-700">
+                          Nội dung hiển thị trên video
+                        </label>
+                        <select
+                          value={subtitleContentMode}
+                          onChange={(e) =>
+                            setSubtitleContentMode(
+                              e.target.value as
+                                | "all"
+                                | "with_grammar"
+                                | "bilingual"
+                                | "text_only"
+                            )
+                          }
+                          aria-label="Nội dung phụ đề trên video"
+                          className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-800 focus:border-indigo-400 focus:outline-none"
+                        >
+                          <option value="all">
+                            Đầy đủ (Lời thoại + Dịch + Gợi ý sửa)
+                          </option>
+                          <option value="with_grammar">
+                            Lời thoại + Gợi ý sửa lỗi
+                          </option>
+                          <option value="bilingual">
+                            Song ngữ (Lời thoại + Dịch Việt)
+                          </option>
+                          <option value="text_only">Chỉ lời thoại gốc</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-[11px] font-semibold text-slate-700">
+                          Font chữ Google (Tiếng Việt &amp; Icon)
+                        </label>
+                        <select
+                          value={subtitleFont}
+                          onChange={(e) =>
+                            setSubtitleFont(
+                              e.target.value as
+                                | "Be Vietnam Pro"
+                                | "Noto Sans"
+                                | "Lexend"
+                            )
+                          }
+                          disabled={burnMode === "softsub"}
+                          aria-label="Chọn font chữ Google cho phụ đề"
+                          className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-800 focus:border-indigo-400 focus:outline-none disabled:bg-slate-100 disabled:text-slate-400"
+                        >
+                          <option value="Be Vietnam Pro">
+                            Be Vietnam Pro (Khuyên dùng — Dấu Việt cực nét)
+                          </option>
+                          <option value="Noto Sans">
+                            Noto Sans (Chuẩn IPA &amp; Đa ngôn ngữ)
+                          </option>
+                          <option value="Lexend">
+                            Lexend (Khoáng đạt, dễ đọc luyện nghe)
+                          </option>
+                        </select>
+                      </div>
                     </div>
-                    <div className="sm:col-span-4">
-                      <label className="block text-[11px] font-semibold text-slate-700">
-                        Nội dung hiển thị trên video
-                      </label>
-                      <select
-                        value={subtitleContentMode}
-                        onChange={(e) =>
-                          setSubtitleContentMode(
-                            e.target.value as
-                              | "all"
-                              | "with_grammar"
-                              | "bilingual"
-                              | "text_only"
-                          )
-                        }
-                        aria-label="Nội dung phụ đề trên video"
-                        className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-800 focus:border-indigo-400 focus:outline-none"
-                      >
-                        <option value="all">
-                          Đầy đủ (Lời thoại + Dịch + Gợi ý sửa)
-                        </option>
-                        <option value="with_grammar">
-                          Lời thoại + Gợi ý sửa lỗi
-                        </option>
-                        <option value="bilingual">
-                          Song ngữ (Lời thoại + Dịch Việt)
-                        </option>
-                        <option value="text_only">Chỉ lời thoại gốc</option>
-                      </select>
-                    </div>
-                    <div className="flex items-end sm:col-span-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="text-[11px] text-slate-500">
+                        {burnMode === "hardsub"
+                          ? "Tự đóng gói Noto Emoji vector & tự chỉnh cỡ chữ theo video ngang/dọc."
+                          : "Softsub dùng font mặc định của trình phát video."}
+                      </span>
                       <button
                         type="button"
                         onClick={() => void handleEmbedSubtitlesVideo()}
@@ -1532,7 +1577,7 @@ export function MediaToolsPage({
                           !ffmpegAvailable ||
                           scriptResult.transcript.segments.length === 0
                         }
-                        className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
+                        className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-indigo-600 px-3.5 py-1.5 text-xs font-bold text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
                       >
                         <Film className="h-3.5 w-3.5" />
                         Xuất Video + Script
@@ -1773,6 +1818,13 @@ export function MediaToolsPage({
                                 placeholder="Nhập lời nói chuẩn..."
                                 className="mt-0.5 w-full rounded-md border border-slate-200 px-2.5 py-1.5 text-sm focus:border-indigo-400 focus:outline-none"
                               />
+                              <SubtitleIconQuickBar
+                                label="Chèn icon"
+                                value={seg.text}
+                                onChange={(next) =>
+                                  updateSegmentAt(originalIdx, { text: next })
+                                }
+                              />
                             </div>
 
                             <div className="grid gap-2 sm:grid-cols-2">
@@ -1806,6 +1858,15 @@ export function MediaToolsPage({
                                   }
                                   placeholder="VD: Nên dùng 'went' thay vì 'go'..."
                                   className="mt-0.5 w-full rounded-md border border-slate-200 px-2 py-1 text-xs focus:border-indigo-400 focus:outline-none"
+                                />
+                                <SubtitleIconQuickBar
+                                  label="Icon sửa lỗi"
+                                  value={seg.grammar_note}
+                                  onChange={(next) =>
+                                    updateSegmentAt(originalIdx, {
+                                      grammar_note: next,
+                                    })
+                                  }
                                 />
                               </div>
                             </div>
@@ -1885,6 +1946,38 @@ export function MediaToolsPage({
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+const SUBTITLE_QUICK_ICONS = ["🎓", "💡", "🎤", "✅", "⚠️", "⭐", "💬"] as const;
+
+function SubtitleIconQuickBar({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  onChange: (next: string) => void;
+}) {
+  return (
+    <div className="mt-1 flex flex-wrap items-center gap-1">
+      <span className="text-[10px] text-slate-400">{label}:</span>
+      {SUBTITLE_QUICK_ICONS.map((icon) => (
+        <button
+          key={icon}
+          type="button"
+          onClick={() =>
+            onChange(value.trim() ? `${value.trimEnd()} ${icon}` : `${icon} `)
+          }
+          title={`Chèn ${icon}`}
+          style={{ fontFamily: `"Noto Emoji", sans-serif` }}
+          className="rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-xs leading-none hover:border-indigo-300 hover:bg-indigo-50"
+        >
+          {icon}
+        </button>
+      ))}
     </div>
   );
 }

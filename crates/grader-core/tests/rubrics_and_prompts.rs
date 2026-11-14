@@ -10,10 +10,11 @@ use grader_core::rubrics::{
     AssignmentImage, Criterion, CriterionLevel, Rubric,
 };
 use grader_core::schemas::{
-    assessment_result_gemini_schema, format_transcript_ass, format_transcript_markdown,
-    format_transcript_srt, format_transcript_srt_with_mode, format_transcript_text,
-    transcript_result_gemini_schema, AssessmentResult, CriterionScore, Evidence, StudentAssessment,
-    TranscriptResult, TranscriptSegment, TranscriptSpeaker,
+    assessment_result_gemini_schema, format_transcript_ass, format_transcript_ass_with_options,
+    format_transcript_markdown, format_transcript_srt, format_transcript_srt_with_mode,
+    format_transcript_text, transcript_result_gemini_schema, AssSubtitleOptions, AssessmentResult,
+    CriterionScore, Evidence, StudentAssessment, TranscriptResult, TranscriptSegment,
+    TranscriptSpeaker,
 };
 
 fn sample_result() -> AssessmentResult {
@@ -564,4 +565,55 @@ fn test_format_transcript_ass_and_srt_modes() {
     let ass_grammar = format_transcript_ass(&sample, "with_grammar");
     assert!(!ass_grammar.contains("Dịch:"));
     assert!(ass_grammar.contains(r"\N{\fs23\c&H80D8FF&}Sửa: Dùng 'reading books'."));
+}
+
+#[test]
+fn test_format_transcript_ass_with_options_fonts_icons_and_portrait() {
+    let sample = TranscriptResult {
+        summary: "Phỏng vấn ngắn.".into(),
+        detected_language: "English".into(),
+        speakers: vec![TranscriptSpeaker {
+            id: "T1".into(),
+            label: "Cô Lan".into(),
+            role: "teacher".into(),
+            name_confident: true,
+        }],
+        segments: vec![TranscriptSegment {
+            start_time: "00:01".into(),
+            end_time: "00:04".into(),
+            speaker_id: "T1".into(),
+            speaker_label: "Cô Lan".into(),
+            role: "teacher".into(),
+            text: "Xin chào 🎓 Good job ✅".into(),
+            translation: "Chào cả lớp ⭐".into(),
+            grammar_note: "⚠️ Chú ý nhấn âm".into(),
+        }],
+    };
+
+    let defaults = AssSubtitleOptions::default();
+    assert_eq!(defaults.font_name, "Be Vietnam Pro");
+    assert_eq!(defaults.play_res_x, 1280);
+    assert_eq!(defaults.play_res_y, 720);
+
+    let default_ass = format_transcript_ass_with_options(&sample, &defaults);
+    assert!(default_ass.contains(",Be Vietnam Pro,"));
+    assert!(default_ass.contains("PlayResX: 1280"));
+    assert!(default_ass.contains("PlayResY: 720"));
+
+    let portrait_opts = AssSubtitleOptions {
+        content_mode: "all".into(),
+        font_name: "Lexend".into(),
+        play_res_x: 720,
+        play_res_y: 1280,
+    };
+    let portrait_ass = format_transcript_ass_with_options(&sample, &portrait_opts);
+    assert!(portrait_ass.contains("PlayResX: 720"));
+    assert!(portrait_ass.contains("PlayResY: 1280"));
+    assert!(portrait_ass.contains(",Lexend,"));
+    assert!(portrait_ass.contains(r"{\fnNoto Emoji}🎓{\fn}"));
+    assert!(portrait_ass.contains(r"{\fnNoto Emoji}✅{\fn}"));
+    assert!(portrait_ass.contains(r"{\fnNoto Emoji}⭐{\fn}"));
+    // \u{26A0}\u{FE0F} ("⚠️") phải bỏ variation selector \u{FE0F} để Noto Emoji vẽ sạch
+    assert!(portrait_ass.contains(r"{\fnNoto Emoji}⚠{\fn}"));
+    assert!(!portrait_ass.contains('\u{FE0F}'));
 }

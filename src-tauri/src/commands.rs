@@ -3,13 +3,14 @@ use std::time::{Duration, Instant};
 
 use grader_core::export::{default_export_path, export_to_excel};
 use grader_core::{
-    build_prompt_parts, compress_video_to, embed_subtitles_video_to, extract_mp3_to,
-    extract_speech_mp3_to, fmt_num, format_result_markdown, format_transcript_ass,
+    build_prompt_parts, compress_video_to, embed_subtitles_video_with_fonts_to, extract_mp3_to,
+    extract_speech_mp3_to, fmt_num, format_result_markdown, format_transcript_ass_with_options,
     format_transcript_markdown, format_transcript_srt_with_mode, format_transcript_text,
-    mp3_presets, mute_video_to, probe_duration_secs, resolve_ffmpeg, trim_media_to, video_presets,
-    AssessmentDetail, AssessmentSummary, AssignmentImage, GeminiClient, GradingAssignment,
-    MediaResolution, Mp3Preset, NewAssessment, PromptParts, PromptProfile, Rubric,
-    TranscribeOptions, TranscriptResult, VideoPreset, DEFAULT_MODEL, FALLBACK_MODELS,
+    mp3_presets, mute_video_to, probe_duration_secs, probe_video_dimensions, resolve_ffmpeg,
+    trim_media_to, video_presets, AssSubtitleOptions, AssessmentDetail, AssessmentSummary,
+    AssignmentImage, GeminiClient, GradingAssignment, MediaResolution, Mp3Preset, NewAssessment,
+    PromptParts, PromptProfile, Rubric, TranscribeOptions, TranscriptResult, VideoPreset,
+    DEFAULT_MODEL, FALLBACK_MODELS,
 };
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State};
@@ -137,6 +138,8 @@ pub struct EmbedSubtitlesRequest {
     pub transcript: TranscriptResult,
     pub burn_mode: String,
     pub content_mode: String,
+    #[serde(default)]
+    pub font_name: Option<String>,
     pub out_dir_override: Option<String>,
     pub out_path_override: Option<String>,
 }
@@ -985,9 +988,26 @@ pub async fn embed_subtitles_video_cmd(
         .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
         .collect();
     let (sub_ext, sub_content) = if burn_in {
+        let (play_res_x, play_res_y) = match probe_video_dimensions(&ffmpeg, &src).await {
+            Some((w, h)) if w < h => (720, 1280),
+            _ => (1280, 720),
+        };
+        let font_name = req
+            .font_name
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .unwrap_or("Be Vietnam Pro")
+            .to_string();
+        let options = AssSubtitleOptions {
+            content_mode: req.content_mode.clone(),
+            font_name,
+            play_res_x,
+            play_res_y,
+        };
         (
             "ass",
-            format_transcript_ass(&req.transcript, &req.content_mode),
+            format_transcript_ass_with_options(&req.transcript, &options),
         )
     } else {
         (
@@ -999,12 +1019,14 @@ pub async fn embed_subtitles_video_cmd(
     std::fs::write(&temp_sub_path, sub_content)
         .map_err(|e| format!("Không ghi được file phụ đề tạm: {e}"))?;
 
+    let fonts_dir = burn_in.then(|| state.resolve_fonts_dir()).flatten();
     let cancel = state.register_task(&req.task_id).await;
-    let res = embed_subtitles_video_to(
+    let res = embed_subtitles_video_with_fonts_to(
         &ffmpeg,
         &src,
         &temp_sub_path,
         burn_in,
+        fonts_dir.as_deref(),
         &out_dir,
         out_file.as_deref(),
         |p| emit_progress(&app, &req.task_id, p.stage, p.percent),

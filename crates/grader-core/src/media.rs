@@ -463,6 +463,23 @@ pub fn build_embed_subtitles_video_args_to(
     burn_in: bool,
     out_path: &Path,
 ) -> Vec<String> {
+    build_embed_subtitles_video_args_with_fonts_to(
+        video_path,
+        subtitle_path,
+        burn_in,
+        None,
+        out_path,
+    )
+}
+
+/// Dựng tham số CLI `ffmpeg` cho ghép phụ đề/script vào video kèm thư mục font (`fontsdir`) cho `libass`.
+pub fn build_embed_subtitles_video_args_with_fonts_to(
+    video_path: &Path,
+    subtitle_path: &Path,
+    burn_in: bool,
+    fonts_dir: Option<&Path>,
+    out_path: &Path,
+) -> Vec<String> {
     let mut args = vec![
         "-y".into(),
         "-i".into(),
@@ -470,10 +487,17 @@ pub fn build_embed_subtitles_video_args_to(
     ];
 
     if burn_in {
-        let escaped = escape_ffmpeg_filter_path(subtitle_path);
+        let escaped_sub = escape_ffmpeg_filter_path(subtitle_path);
+        let filter = match fonts_dir {
+            Some(dir) if !dir.as_os_str().is_empty() => {
+                let escaped_dir = escape_ffmpeg_filter_path(dir);
+                format!("ass={escaped_sub}:fontsdir={escaped_dir}")
+            }
+            _ => format!("ass={escaped_sub}"),
+        };
         args.extend([
             "-vf".into(),
-            format!("ass={escaped}"),
+            filter,
             "-c:v".into(),
             "libx264".into(),
             "-pix_fmt".into(),
@@ -521,8 +545,7 @@ pub fn build_embed_subtitles_video_args_to(
     args
 }
 
-/// Đọc thời lượng video (giây) từ stderr của `ffmpeg -i`.
-pub async fn probe_duration_secs(ffmpeg_exe: &Path, video_path: &Path) -> Option<f64> {
+async fn probe_ffmpeg_stderr(ffmpeg_exe: &Path, video_path: &Path) -> Option<String> {
     let out = Command::new(ffmpeg_exe)
         .arg("-i")
         .arg(video_path)
@@ -531,8 +554,55 @@ pub async fn probe_duration_secs(ffmpeg_exe: &Path, video_path: &Path) -> Option
         .output()
         .await
         .ok()?;
-    let stderr = String::from_utf8_lossy(&out.stderr);
+    Some(String::from_utf8_lossy(&out.stderr).into_owned())
+}
+
+/// Đọc thời lượng video (giây) từ stderr của `ffmpeg -i`.
+pub async fn probe_duration_secs(ffmpeg_exe: &Path, video_path: &Path) -> Option<f64> {
+    let stderr = probe_ffmpeg_stderr(ffmpeg_exe, video_path).await?;
     parse_duration_from_stderr(&stderr)
+}
+
+/// Đọc kích thước hiển thị `(width, height)` của video từ stderr của `ffmpeg -i`.
+pub async fn probe_video_dimensions(ffmpeg_exe: &Path, video_path: &Path) -> Option<(u32, u32)> {
+    let stderr = probe_ffmpeg_stderr(ffmpeg_exe, video_path).await?;
+    parse_video_dimensions_from_stderr(&stderr)
+}
+
+/// Trích xuất kích thước hiển thị `(width, height)` từ output stderr của `ffmpeg -i`,
+/// có tính tới metadata xoay 90°/270° trên luồng video.
+pub fn parse_video_dimensions_from_stderr(stderr: &str) -> Option<(u32, u32)> {
+    static RE_DIM: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r",\s*(\d{2,5})x(\d{2,5})(?:$|[\s,\[])").unwrap());
+    static RE_ROTATE: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"(?i)(?:rotate\s*:\s*|displaymatrix:\s*rotation\s+of\s+)(-?\d+(?:\.\d+)?)")
+            .unwrap()
+    });
+
+    let mut lines = stderr.lines();
+    let video_line = lines.find(|line| line.contains("Stream #") && line.contains("Video:"))?;
+    let caps = RE_DIM.captures(video_line)?;
+    let w: u32 = caps.get(1)?.as_str().parse().ok()?;
+    let h: u32 = caps.get(2)?.as_str().parse().ok()?;
+    if w == 0 || h == 0 {
+        return None;
+    }
+
+    for line in lines {
+        if line.trim_start().starts_with("Stream #") {
+            break;
+        }
+        if let Some(rc) = RE_ROTATE.captures(line) {
+            if let Ok(deg) = rc.get(1)?.as_str().parse::<f64>() {
+                let norm = ((deg.round() as i32) % 360 + 360) % 360;
+                if norm == 90 || norm == 270 {
+                    return Some((h, w));
+                }
+            }
+        }
+    }
+
+    Some((w, h))
 }
 
 pub fn parse_duration_from_stderr(stderr: &str) -> Option<f64> {
@@ -882,6 +952,36 @@ pub async fn embed_subtitles_video_to<F>(
 where
     F: FnMut(MediaProgress) + Send,
 {
+    embed_subtitles_video_with_fonts_to(
+        ffmpeg_exe,
+        video_path,
+        subtitle_path,
+        burn_in,
+        None,
+        default_out_dir,
+        out_path_override,
+        on_progress,
+        cancel,
+    )
+    .await
+}
+
+/// Ghép phụ đề/script vào video kèm thư mục `fontsdir` để `libass` dùng font Google đóng gói sẵn.
+#[allow(clippy::too_many_arguments)]
+pub async fn embed_subtitles_video_with_fonts_to<F>(
+    ffmpeg_exe: &Path,
+    video_path: &Path,
+    subtitle_path: &Path,
+    burn_in: bool,
+    fonts_dir: Option<&Path>,
+    default_out_dir: &Path,
+    out_path_override: Option<&Path>,
+    on_progress: F,
+    cancel: Option<&CancellationToken>,
+) -> Result<PathBuf>
+where
+    F: FnMut(MediaProgress) + Send,
+{
     ensure_input_exists(video_path, false)?;
     if !subtitle_path.exists() {
         return Err(GraderError::Video(format!(
@@ -897,7 +997,13 @@ where
     };
     let out_path = resolve_target_path(default_out_dir, default_name, out_path_override);
     let duration_secs = probe_duration_secs(ffmpeg_exe, video_path).await;
-    let args = build_embed_subtitles_video_args_to(video_path, subtitle_path, burn_in, &out_path);
+    let args = build_embed_subtitles_video_args_with_fonts_to(
+        video_path,
+        subtitle_path,
+        burn_in,
+        fonts_dir,
+        &out_path,
+    );
     let running_stage = if burn_in {
         "Đang đốt phụ đề script lên video..."
     } else {

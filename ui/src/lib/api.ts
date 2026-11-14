@@ -213,6 +213,7 @@ export const api = {
     transcript: TranscriptResult;
     burn_mode: "hardsub" | "softsub";
     content_mode: "all" | "with_grammar" | "bilingual" | "text_only";
+    font_name?: string;
     out_dir_override?: string;
     out_path_override?: string;
   }) => invoke<MediaOutput>("embed_subtitles_video_cmd", { req }),

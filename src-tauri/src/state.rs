@@ -82,6 +82,27 @@ impl AppState {
             .map(PathBuf::from)
     }
 
+    pub fn resolve_fonts_dir(&self) -> Option<PathBuf> {
+        let mut candidates: Vec<PathBuf> = Vec::new();
+        if let Ok(cwd) = std::env::current_dir() {
+            candidates.push(cwd.join("ui/public/fonts"));
+            candidates.push(cwd.join("../ui/public/fonts"));
+            candidates.push(cwd.join("fonts"));
+        }
+        if let Ok(exe) = std::env::current_exe() {
+            if let Some(exe_dir) = exe.parent() {
+                candidates.push(exe_dir.join("fonts"));
+                candidates.push(exe_dir.join("resources/fonts"));
+                candidates.push(exe_dir.join("../Resources/fonts"));
+                candidates.push(exe_dir.join("../ui/public/fonts"));
+            }
+        }
+        candidates.push(self.paths.data_dir.join("fonts"));
+        candidates.push(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../ui/public/fonts"));
+
+        candidates.into_iter().find(|dir| dir.is_dir())
+    }
+
     pub async fn register_task(&self, task_id: &str) -> CancellationToken {
         let token = CancellationToken::new();
         let mut guard = self.cancel_tokens.lock().await;
