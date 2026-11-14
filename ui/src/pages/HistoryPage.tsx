@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import {
+  ChevronDown,
+  ChevronUp,
+  Film,
+  FolderOpen,
   LayoutList,
   Loader2,
   RefreshCw,
@@ -10,6 +14,7 @@ import {
   X,
 } from "lucide-react";
 import { HistoryTable } from "../components/HistoryTable";
+import { LocalMediaPlayer } from "../components/LocalMediaPlayer";
 import { ResultView } from "../components/ResultView";
 import { api } from "../lib/api";
 import type { AssessmentDetail, AssessmentSummary } from "../lib/types";
@@ -36,11 +41,14 @@ export function HistoryPage() {
   const [rows, setRows] = useState<AssessmentSummary[]>([]);
   const [loading, setLoading] = useState(false);
   const [selected, setSelected] = useState<AssessmentDetail | null>(null);
+  const [videoAvailable, setVideoAvailable] = useState(false);
+  const [videoOpen, setVideoOpen] = useState(true);
   const [err, setErr] = useState("");
 
   const requestSeqRef = useRef(0);
   const listScrollRef = useRef<HTMLDivElement>(null);
   const detailRef = useRef<HTMLDivElement>(null);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
 
   const hasMore = rows.length >= limit;
 
@@ -74,6 +82,49 @@ export function HistoryPage() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rows, viewMode]);
+
+  useEffect(() => {
+    const vp = selected?.video_path;
+    if (!vp) {
+      setVideoAvailable(false);
+      return;
+    }
+    let cancelled = false;
+    setVideoAvailable(false);
+    api
+      .inspectFile(vp)
+      .then(() => {
+        if (!cancelled) setVideoAvailable(true);
+      })
+      .catch(() => {
+        if (!cancelled) setVideoAvailable(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selected?.id, selected?.video_path]);
+
+  function handleSeekVideo(timestamp: string) {
+    const parts = timestamp
+      .trim()
+      .split(":")
+      .map((p) => Number(p));
+    if (parts.some((n) => Number.isNaN(n))) return;
+    const secs =
+      parts.length === 2
+        ? parts[0] * 60 + parts[1]
+        : parts.length === 3
+        ? parts[0] * 3600 + parts[1] * 60 + parts[2]
+        : null;
+    if (secs === null) return;
+    setVideoOpen(true);
+    requestAnimationFrame(() => {
+      const el = videoRef.current;
+      if (!el) return;
+      el.currentTime = Math.max(0, secs);
+      void el.play().catch(() => {});
+    });
+  }
 
   function changeViewMode(mode: HistoryViewMode) {
     setViewMode(mode);
@@ -245,12 +296,57 @@ export function HistoryPage() {
                   Đóng chi tiết
                 </button>
               </div>
+              {videoAvailable && selected.video_path && (
+                <div className="rounded-xl border border-slate-200 bg-white p-3.5 shadow-xs">
+                  <button
+                    type="button"
+                    onClick={() => setVideoOpen((v) => !v)}
+                    className="flex w-full items-center justify-between gap-2 text-left text-xs font-bold text-slate-800"
+                  >
+                    <span className="inline-flex items-center gap-1.5">
+                      <Film className="h-4 w-4 text-indigo-600" />
+                      Xem lại video bài nói ({selected.video_name})
+                    </span>
+                    {videoOpen ? (
+                      <ChevronUp className="h-4 w-4 text-slate-400" />
+                    ) : (
+                      <ChevronDown className="h-4 w-4 text-slate-400" />
+                    )}
+                  </button>
+                  {videoOpen && (
+                    <div className="mt-2.5 space-y-2">
+                      <LocalMediaPlayer
+                        ref={videoRef}
+                        path={selected.video_path}
+                        kind="video"
+                      />
+                      <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-slate-50 px-3 py-1.5 text-[11px] text-slate-600">
+                        <code
+                          className="min-w-0 flex-1 truncate"
+                          title={selected.video_path}
+                        >
+                          {selected.video_path}
+                        </code>
+                        <button
+                          type="button"
+                          onClick={() => void api.revealInFolder(selected.video_path!)}
+                          className="inline-flex shrink-0 items-center gap-1 font-semibold text-indigo-600 hover:underline"
+                        >
+                          <FolderOpen className="h-3 w-3" />
+                          Mở thư mục
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
               <ResultView
                 detail={selected}
                 onDetailUpdated={(updated) => {
                   setSelected(updated);
                   void refresh(query, limit);
                 }}
+                onSeekVideo={videoAvailable ? handleSeekVideo : undefined}
               />
             </div>
           )}
@@ -337,15 +433,62 @@ export function HistoryPage() {
           </div>
 
           {/* Right detail */}
-          <div className="md:col-span-7 xl:col-span-8 2xl:col-span-9">
+          <div className="space-y-3 md:col-span-7 xl:col-span-8 2xl:col-span-9">
             {selected ? (
-              <ResultView
-                detail={selected}
-                onDetailUpdated={(updated) => {
-                  setSelected(updated);
-                  void refresh(query, limit);
-                }}
-              />
+              <>
+                {videoAvailable && selected.video_path && (
+                  <div className="rounded-xl border border-slate-200 bg-white p-3.5 shadow-xs">
+                    <button
+                      type="button"
+                      onClick={() => setVideoOpen((v) => !v)}
+                      className="flex w-full items-center justify-between gap-2 text-left text-xs font-bold text-slate-800"
+                    >
+                      <span className="inline-flex items-center gap-1.5">
+                        <Film className="h-4 w-4 text-indigo-600" />
+                        Xem lại video bài nói ({selected.video_name})
+                      </span>
+                      {videoOpen ? (
+                        <ChevronUp className="h-4 w-4 text-slate-400" />
+                      ) : (
+                        <ChevronDown className="h-4 w-4 text-slate-400" />
+                      )}
+                    </button>
+                    {videoOpen && (
+                      <div className="mt-2.5 space-y-2">
+                        <LocalMediaPlayer
+                          ref={videoRef}
+                          path={selected.video_path}
+                          kind="video"
+                        />
+                        <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-slate-50 px-3 py-1.5 text-[11px] text-slate-600">
+                          <code
+                            className="min-w-0 flex-1 truncate"
+                            title={selected.video_path}
+                          >
+                            {selected.video_path}
+                          </code>
+                          <button
+                            type="button"
+                            onClick={() => void api.revealInFolder(selected.video_path!)}
+                            className="inline-flex shrink-0 items-center gap-1 font-semibold text-indigo-600 hover:underline"
+                          >
+                            <FolderOpen className="h-3 w-3" />
+                            Mở thư mục
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+                <ResultView
+                  detail={selected}
+                  onDetailUpdated={(updated) => {
+                    setSelected(updated);
+                    void refresh(query, limit);
+                  }}
+                  onSeekVideo={videoAvailable ? handleSeekVideo : undefined}
+                />
+              </>
             ) : (
               <div className="flex min-h-[260px] items-center justify-center rounded-xl border border-dashed border-slate-200 bg-white/60 p-6 text-center text-sm text-slate-500">
                 Chọn một lần chấm bên trái để xem chi tiết, gán lại tên học sinh hoặc xuất lại Excel.
