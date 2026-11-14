@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { ConfirmDialog } from "../components/ConfirmDialog";
 import {
+  BookmarkCheck,
   BookmarkPlus,
   ChevronDown,
   ChevronRight,
@@ -13,7 +13,6 @@ import {
   Save,
   SlidersHorizontal,
   Sparkles,
-  Trash2,
   Upload,
   X,
   ZoomIn,
@@ -23,6 +22,11 @@ import { ProgressPanel } from "../components/ProgressPanel";
 import { ResultView } from "../components/ResultView";
 import { SelectField } from "../components/SelectField";
 import { api, LANG_LABELS, TASK_LABELS } from "../lib/api";
+import {
+  FLEX_ROUNDING_OPTIONS,
+  FLEX_SCALE_PRESETS,
+  readClipboardImageFile,
+} from "../lib/gradingConstants";
 import {
   getParentDir,
   IMAGE_EXTENSIONS,
@@ -55,19 +59,10 @@ interface GradePageProps {
   hasCustomExportDir: boolean;
   onBootstrapUpdated: (next: AppBootstrap) => void;
   onAssignmentsChanged: (next: GradingAssignment[]) => void;
+  externalSelectedAssignmentId?: string | null;
+  onExternalAssignmentConsumed?: () => void;
+  onOpenAssignmentsManager?: () => void;
 }
-
-const MAX_IMAGE_BYTES = 15 * 1024 * 1024;
-
-const FLEX_SCALE_PRESETS = [10, 20, 100];
-
-const FLEX_ROUNDING_OPTIONS = [
-  { value: "0.5", label: "Làm tròn 0.5" },
-  { value: "0.25", label: "Làm tròn 0.25" },
-  { value: "0.1", label: "Làm tròn 0.1" },
-  { value: "1", label: "Số nguyên (1)" },
-  { value: "", label: "Không làm tròn" },
-];
 
 const QUICK_REQUIREMENT_CHIPS = [
   {
@@ -87,43 +82,6 @@ const QUICK_REQUIREMENT_CHIPS = [
     text: "Nếu học sinh nhìn giấy đọc máy móc, thiếu tự nhiên thì trừ điểm.",
   },
 ];
-
-function readClipboardImageFile(file: File): Promise<AssignmentImage> {
-  return new Promise((resolve, reject) => {
-    if (file.size > MAX_IMAGE_BYTES) {
-      reject(
-        new Error(
-          `Ảnh dán quá lớn (${(file.size / (1024 * 1024)).toFixed(1)} MB). Giới hạn tối đa mỗi ảnh là 15 MB.`
-        )
-      );
-      return;
-    }
-    const reader = new FileReader();
-    reader.onload = () => {
-      const result = typeof reader.result === "string" ? reader.result : "";
-      const commaIdx = result.indexOf(",");
-      if (commaIdx < 0) {
-        reject(new Error("Không đọc được dữ liệu ảnh từ clipboard."));
-        return;
-      }
-      const dataBase64 = result.slice(commaIdx + 1);
-      const mimeType = file.type || "image/png";
-      const ext = mimeType.split("/")[1]?.replace("jpeg", "jpg") || "png";
-      const fileName =
-        file.name && file.name !== "image.png"
-          ? file.name
-          : `anh_de_${Date.now()}.${ext}`;
-      resolve({
-        name: fileName,
-        mime_type: mimeType,
-        data_base64: dataBase64,
-      });
-    };
-    reader.onerror = () =>
-      reject(new Error("Không thể đọc ảnh từ clipboard."));
-    reader.readAsDataURL(file);
-  });
-}
 
 function parseTimestampToSeconds(ts: string): number | null {
   const parts = ts
@@ -150,6 +108,9 @@ export function GradePage({
   hasCustomExportDir,
   onBootstrapUpdated,
   onAssignmentsChanged,
+  externalSelectedAssignmentId,
+  onExternalAssignmentConsumed,
+  onOpenAssignmentsManager,
 }: GradePageProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const videoDropRef = useRef<HTMLDivElement | null>(null);
@@ -344,30 +305,12 @@ export function GradePage({
     }
   }
 
-  const [confirmDeleteAssignmentOpen, setConfirmDeleteAssignmentOpen] =
-    useState(false);
-
-  function handleDeleteAssignment() {
-    if (!selectedAssignmentId) return;
-    setConfirmDeleteAssignmentOpen(true);
-  }
-
-  async function executeDeleteAssignment() {
-    if (!selectedAssignmentId) return;
-    setConfirmDeleteAssignmentOpen(false);
-    const found = gradingAssignments.find((a) => a.id === selectedAssignmentId);
-    setErrorMsg("");
-    try {
-      const updated = await api.deleteGradingAssignment(selectedAssignmentId);
-      onAssignmentsChanged(updated);
-      setSelectedAssignmentId("");
-      setAssignmentName("");
-      setSavePanelOpen(false);
-      setStatusMsg(`🗑️ Đã xóa đợt chấm "${found?.name ?? ""}".`);
-    } catch (e) {
-      setErrorMsg(String(e));
-    }
-  }
+  useEffect(() => {
+    if (!externalSelectedAssignmentId) return;
+    handleSelectAssignment(externalSelectedAssignmentId);
+    onExternalAssignmentConsumed?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [externalSelectedAssignmentId]);
 
   function appendQuickRequirement(snippet: string) {
     setExtraInstructions((prev) => {
@@ -906,15 +849,18 @@ export function GradePage({
                     className="min-w-0 flex-1"
                     ariaLabel="Chọn đợt chấm hoặc đề bài đã lưu"
                   />
-                  {selectedAssignmentId && (
+                  {onOpenAssignmentsManager && (
                     <button
                       type="button"
-                      onClick={() => void handleDeleteAssignment()}
-                      disabled={busyTaskId !== null}
-                      className="rounded-lg border border-rose-200 bg-white p-1.5 text-rose-600 hover:bg-rose-50 disabled:opacity-50"
-                      title="Xóa đợt chấm đã lưu này"
+                      onClick={() => {
+                        setConfigDrawerOpen(false);
+                        onOpenAssignmentsManager();
+                      }}
+                      className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-50"
+                      title="Mở trang quản lý Đề chấm lẻ"
                     >
-                      <Trash2 className="h-3.5 w-3.5" />
+                      <BookmarkCheck className="h-3.5 w-3.5 text-indigo-600" />
+                      Quản lý
                     </button>
                   )}
                 </div>
@@ -1006,6 +952,19 @@ export function GradePage({
 
               {gradingMode === "flexible" ? (
                 <div className="space-y-2.5">
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-600">
+                      Tiêu đề / Tên đề (lưu vào Lịch sử &amp; Excel)
+                    </label>
+                    <input
+                      type="text"
+                      value={assignmentName}
+                      onChange={(e) => setAssignmentName(e.target.value)}
+                      disabled={busyTaskId !== null}
+                      placeholder={`Mặc định: Chấm linh hoạt (Thang ${formatScoreNum(flexibleMaxScore)})`}
+                      className="mt-1 w-full rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs focus:border-indigo-400 focus:outline-none"
+                    />
+                  </div>
                   <div className="grid grid-cols-12 gap-2">
                     <div className="col-span-7">
                       <label className="block text-[11px] font-semibold text-slate-600">
@@ -1333,18 +1292,6 @@ export function GradePage({
           </div>
         </div>
       )}
-
-      <ConfirmDialog
-        open={confirmDeleteAssignmentOpen}
-        title={`Xóa đợt chấm đã lưu "${
-          gradingAssignments.find((a) => a.id === selectedAssignmentId)?.name ??
-          selectedAssignmentId
-        }"?`}
-        description="Cấu hình đề bài và ảnh đính kèm đã lưu trong đợt chấm này sẽ bị xóa."
-        confirmLabel="Xóa đợt chấm"
-        onConfirm={() => void executeDeleteAssignment()}
-        onCancel={() => setConfirmDeleteAssignmentOpen(false)}
-      />
     </div>
   );
 }

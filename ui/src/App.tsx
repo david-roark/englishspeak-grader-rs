@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import {
+  BookmarkCheck,
   BookOpen,
   ChevronDown,
   ChevronUp,
@@ -17,13 +18,20 @@ import { api, MEDIA_RES_OPTIONS } from "./lib/api";
 import type { AppBootstrap } from "./lib/types";
 import { SelectField } from "./components/SelectField";
 import { ThemeSwitcher } from "./components/ThemeSwitcher";
+import { AssignmentsPage } from "./pages/AssignmentsPage";
 import { GradePage } from "./pages/GradePage";
 import { HistoryPage } from "./pages/HistoryPage";
 import { MediaToolsPage } from "./pages/MediaToolsPage";
 import { RubricsPage } from "./pages/RubricsPage";
 import { SettingsPage } from "./pages/SettingsPage";
 
-type TabKey = "grade" | "rubrics" | "media" | "history" | "settings";
+type TabKey =
+  | "grade"
+  | "rubrics"
+  | "assignments"
+  | "media"
+  | "history"
+  | "settings";
 
 export function App() {
   const [bootstrap, setBootstrap] = useState<AppBootstrap | null>(null);
@@ -37,6 +45,9 @@ export function App() {
   const [loadingModels, setLoadingModels] = useState(false);
   const [headerNotice, setHeaderNotice] = useState("");
   const [quickConfigOpen, setQuickConfigOpen] = useState(false);
+  const [pendingAssignmentId, setPendingAssignmentId] = useState<string | null>(
+    null
+  );
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
     try {
       return localStorage.getItem("esg-sidebar-collapsed") === "true";
@@ -108,6 +119,7 @@ export function App() {
   const navItems: { key: TabKey; label: string; desc: string; icon: typeof Sparkles }[] = [
     { key: "grade", label: "Chấm bài", desc: "Chấm video nói bằng AI", icon: Sparkles },
     { key: "rubrics", label: "Rubric", desc: "Quản lý tiêu chuẩn chấm", icon: BookOpen },
+    { key: "assignments", label: "Đề chấm lẻ", desc: "Quản lý đề linh hoạt & đợt chấm", icon: BookmarkCheck },
     { key: "media", label: "Xưởng Media", desc: "Nén, cắt, tách MP3 & Script AI", icon: Film },
     { key: "history", label: "Lịch sử", desc: "Xem lại các bài đã chấm", icon: History },
     { key: "settings", label: "Cài đặt & Prompt", desc: "API Key, Prompt & Giao diện", icon: Settings },
@@ -445,6 +457,9 @@ export function App() {
                   prev ? { ...prev, grading_assignments } : prev
                 )
               }
+              externalSelectedAssignmentId={pendingAssignmentId}
+              onExternalAssignmentConsumed={() => setPendingAssignmentId(null)}
+              onOpenAssignmentsManager={() => setTab("assignments")}
             />
           </div>
 
@@ -456,6 +471,24 @@ export function App() {
               onRubricsChanged={(rubrics) =>
                 setBootstrap((prev) => (prev ? { ...prev, rubrics } : prev))
               }
+            />
+          )}
+
+          {tab === "assignments" && (
+            <AssignmentsPage
+              assignments={bootstrap.grading_assignments}
+              rubrics={bootstrap.rubrics}
+              promptProfiles={bootstrap.prompt_profiles}
+              activePromptProfileId={bootstrap.active_prompt_profile_id}
+              onAssignmentsChanged={(grading_assignments) =>
+                setBootstrap((prev) =>
+                  prev ? { ...prev, grading_assignments } : prev
+                )
+              }
+              onUseAssignment={(assignment) => {
+                setPendingAssignmentId(assignment.id);
+                setTab("grade");
+              }}
             />
           )}
 
@@ -481,6 +514,12 @@ export function App() {
                 setSelectedModel(next.default_model);
                 setMediaRes(next.media_resolution);
               }}
+              onAssignmentsChanged={(grading_assignments) =>
+                setBootstrap((prev) =>
+                  prev ? { ...prev, grading_assignments } : prev
+                )
+              }
+              onOpenAssignmentsManager={() => setTab("assignments")}
             />
           )}
         </main>
