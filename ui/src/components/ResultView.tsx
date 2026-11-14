@@ -6,6 +6,7 @@ import {
   Edit3,
   FileSpreadsheet,
   FolderOpen,
+  Play,
   Sparkles,
   UserCheck,
   AlertCircle,
@@ -133,50 +134,67 @@ function StudentCard({
           )}
         </div>
 
-        <div className="flex items-center gap-2">
-          <div className="rounded-lg bg-indigo-50 px-3 py-1.5 text-right">
-            <div className="text-[11px] font-medium uppercase tracking-wide text-indigo-600">
+        <div className="flex items-center gap-2.5">
+          <div className="rounded-xl border border-indigo-100 bg-indigo-50/80 px-4 py-2 text-right">
+            <div className="text-[10px] font-bold uppercase tracking-wider text-indigo-600">
               Tổng điểm
             </div>
-            <div className="text-base font-bold text-indigo-950">
-              {fmtScore(s.total_score)} / {fmtScore(s.max_total_score)}
+            <div className="text-2xl font-extrabold leading-tight tabular-nums text-indigo-950">
+              {fmtScore(s.total_score)}
+              <span className="text-sm font-semibold text-indigo-500">
+                {" "}
+                / {fmtScore(s.max_total_score)}
+              </span>
             </div>
           </div>
-          <div className="rounded-lg bg-slate-100 px-3 py-1.5 text-right">
-            <div className="text-[11px] font-medium uppercase tracking-wide text-slate-500">
+          <div className="rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2 text-right">
+            <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
               Xếp loại
             </div>
-            <div className="text-base font-bold text-slate-900">
+            <div className="text-base font-bold leading-tight text-slate-900">
               {s.overall_level}
             </div>
           </div>
         </div>
       </div>
 
-      {/* Bảng tiêu chí */}
-      <div className="mt-4 overflow-x-auto">
-        <table className="w-full border-collapse text-left text-sm">
-          <thead>
-            <tr className="border-b border-slate-200 bg-slate-50 text-xs font-semibold uppercase text-slate-600">
-              <th className="px-3 py-2">Tiêu chí</th>
-              <th className="w-28 px-3 py-2 text-center">Điểm</th>
-              <th className="px-3 py-2">Nhận xét</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-100">
-            {s.criteria.map((c, idx) => (
-              <tr key={idx} className="hover:bg-slate-50/60">
-                <td className="px-3 py-2.5 font-medium text-slate-800">
+      {/* Chi tiết từng tiêu chí với thanh tiến trình trực quan */}
+      <div className="mt-4 space-y-2.5">
+        {s.criteria.map((c, idx) => {
+          const pct =
+            c.max_score > 0
+              ? Math.max(0, Math.min(100, (c.score / c.max_score) * 100))
+              : 0;
+          return (
+            <div
+              key={idx}
+              className="rounded-xl border border-slate-100 bg-slate-50/60 p-3 transition hover:border-slate-200"
+            >
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-sm font-semibold text-slate-800">
                   {c.criterion}
-                </td>
-                <td className="px-3 py-2.5 text-center font-semibold tabular-nums text-indigo-700">
-                  {fmtScore(c.score)} / {fmtScore(c.max_score)}
-                </td>
-                <td className="px-3 py-2.5 text-slate-600">{c.comment}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+                </span>
+                <span className="shrink-0 text-sm font-bold tabular-nums text-indigo-700">
+                  {fmtScore(c.score)}{" "}
+                  <span className="text-xs font-medium text-slate-400">
+                    / {fmtScore(c.max_score)}
+                  </span>
+                </span>
+              </div>
+              <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-slate-200">
+                <div
+                  className="h-full rounded-full bg-indigo-600 transition-all"
+                  style={{ width: `${pct}%` }}
+                />
+              </div>
+              {c.comment && (
+                <p className="mt-1.5 text-xs leading-relaxed text-slate-600">
+                  {c.comment}
+                </p>
+              )}
+            </div>
+          );
+        })}
       </div>
 
       {/* Điểm mạnh, điểm yếu, gợi ý, luyện tập */}
@@ -208,9 +226,10 @@ function StudentCard({
                   type="button"
                   onClick={() => onSeekVideo?.(ev.timestamp)}
                   disabled={!onSeekVideo}
-                  className="shrink-0 rounded bg-indigo-100 px-2 py-0.5 font-mono text-xs font-semibold text-indigo-800 hover:bg-indigo-200 disabled:cursor-default disabled:hover:bg-indigo-100"
+                  className="inline-flex shrink-0 items-center gap-1 rounded-md bg-indigo-100 px-2 py-0.5 font-mono text-xs font-semibold text-indigo-800 transition hover:bg-indigo-200 disabled:cursor-default disabled:hover:bg-indigo-100"
                   title={onSeekVideo ? "Nhảy tới mốc thời gian trong video" : undefined}
                 >
+                  <Play className="h-2.5 w-2.5 fill-current" />
                   {ev.timestamp}
                 </button>
                 <div className="text-slate-700">
