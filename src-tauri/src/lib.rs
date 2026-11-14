@@ -4,8 +4,25 @@ mod state;
 
 use state::AppState;
 
+#[cfg(target_os = "linux")]
+fn configure_linux_media_env() {
+    // On Linux hybrid-GPU laptops (Intel + NVIDIA), WebKitGTK's Wayland/OpenGL display
+    // often runs on Intel while GStreamer's `nvh264dec` (rank primary+1) decodes H.264 into
+    // CUDA memory, causing PBO/OpenGL negotiation failures (black screen / infinite spinner).
+    // Prefer software `avdec_h264` unless the user explicitly overrides GST_PLUGIN_FEATURE_RANK.
+    if std::env::var_os("GST_PLUGIN_FEATURE_RANK").is_none() {
+        std::env::set_var(
+            "GST_PLUGIN_FEATURE_RANK",
+            "avdec_h264:MAX,nvh264dec:NONE,nvautogpuh264dec:NONE,vulkanh264dec:NONE,vulkanh264device1dec:NONE",
+        );
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    #[cfg(target_os = "linux")]
+    configure_linux_media_env();
+
     let app_state = AppState::initialize().expect("Failed to initialize application state");
 
     tauri::Builder::default()
@@ -14,6 +31,7 @@ pub fn run() {
         .manage(app_state)
         .invoke_handler(tauri::generate_handler![
             commands::get_bootstrap,
+            commands::authorize_media_path,
             commands::inspect_file,
             commands::fetch_models,
             commands::cancel_task,

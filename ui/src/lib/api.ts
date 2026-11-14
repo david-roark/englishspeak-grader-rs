@@ -39,18 +39,53 @@ export const MEDIA_RES_OPTIONS = [
   { value: "high", label: "Cao — chi tiết nhất, tốn token nhất" },
 ];
 
-let mediaServerConfig: { baseUrl: string; token: string } | null = null;
+type MediaServerConfig = { baseUrl: string; token: string };
+const MEDIA_SERVER_CONFIG_KEY = "__ES_MEDIA_SERVER_CONFIG__";
+
+function getMediaServerConfig(): MediaServerConfig | null {
+  const holder = globalThis as Record<string, unknown>;
+  const cfg = holder[MEDIA_SERVER_CONFIG_KEY];
+  if (
+    cfg &&
+    typeof cfg === "object" &&
+    "baseUrl" in cfg &&
+    "token" in cfg &&
+    typeof cfg.baseUrl === "string" &&
+    typeof cfg.token === "string"
+  ) {
+    return { baseUrl: cfg.baseUrl, token: cfg.token };
+  }
+  return null;
+}
+
+function setMediaServerConfig(cfg: MediaServerConfig | null) {
+  const holder = globalThis as Record<string, unknown>;
+  holder[MEDIA_SERVER_CONFIG_KEY] = cfg;
+}
 
 export const api = {
   getBootstrap: async () => {
     const boot = await invoke<AppBootstrap>("get_bootstrap");
     if (boot.media_base_url && boot.media_token) {
-      mediaServerConfig = {
+      setMediaServerConfig({
         baseUrl: boot.media_base_url,
         token: boot.media_token,
-      };
+      });
     }
     return boot;
+  },
+  authorizeMediaPath: async (path: string): Promise<string> => {
+    const res = await invoke<{ base_url: string; token: string; url: string }>(
+      "authorize_media_path",
+      { path }
+    );
+    if (res.base_url && res.token) {
+      setMediaServerConfig({
+        baseUrl: res.base_url,
+        token: res.token,
+      });
+    }
+    return res.url || api.mediaUrl(path);
   },
   inspectFile: (path: string) => invoke<FileInfo>("inspect_file", { path }),
   fetchModels: (apiKey?: string) =>
@@ -432,9 +467,10 @@ export const api = {
   openLocalFile: (path: string) => openPath(path),
   revealInFolder: (path: string) => revealItemInDir(path),
   mediaUrl: (path: string) => {
-    if (mediaServerConfig) {
+    const cfg = getMediaServerConfig();
+    if (cfg) {
       const fileName = path.split(/[/\\]/).pop() || "media";
-      return `${mediaServerConfig.baseUrl}/media/${encodeURIComponent(fileName)}?token=${encodeURIComponent(mediaServerConfig.token)}&path=${encodeURIComponent(path)}`;
+      return `${cfg.baseUrl}/media/${encodeURIComponent(fileName)}?token=${encodeURIComponent(cfg.token)}&path=${encodeURIComponent(path)}`;
     }
     return convertFileSrc(path);
   },

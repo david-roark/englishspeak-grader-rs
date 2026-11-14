@@ -301,6 +301,8 @@ pub fn build_compress_video_args_to(
 
     args.push("-c:v".into());
     args.push("libx264".into());
+    args.push("-pix_fmt".into());
+    args.push("yuv420p".into());
     args.push("-preset".into());
     args.push(cfg.preset.into());
 
@@ -393,6 +395,8 @@ pub fn build_trim_media_args_to(
         args.extend([
             "-c:v".into(),
             "libx264".into(),
+            "-pix_fmt".into(),
+            "yuv420p".into(),
             "-preset".into(),
             "fast".into(),
             "-crf".into(),
@@ -472,6 +476,8 @@ pub fn build_embed_subtitles_video_args_to(
             format!("ass={escaped}"),
             "-c:v".into(),
             "libx264".into(),
+            "-pix_fmt".into(),
+            "yuv420p".into(),
             "-preset".into(),
             "fast".into(),
             "-crf".into(),
@@ -489,6 +495,8 @@ pub fn build_embed_subtitles_video_args_to(
             args.extend([
                 "-c:v".into(),
                 "libx264".into(),
+                "-pix_fmt".into(),
+                "yuv420p".into(),
                 "-preset".into(),
                 "fast".into(),
                 "-crf".into(),

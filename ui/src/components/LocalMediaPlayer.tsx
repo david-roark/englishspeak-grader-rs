@@ -42,13 +42,68 @@ export const LocalMediaPlayer = forwardRef<
 >(function LocalMediaPlayer({ path, kind, className, onTimeUpdate }, ref) {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
+  const [retriedAuth, setRetriedAuth] = useState(false);
+  const [authorizedSrc, setAuthorizedSrc] = useState<{
+    path: string;
+    src: string;
+  } | null>(null);
 
   useEffect(() => {
     setErrorMsg(null);
     setReloadKey(0);
+    setRetriedAuth(false);
   }, [path]);
 
-  const src = api.mediaUrl(path);
+  useEffect(() => {
+    let cancelled = false;
+    const maybeAuthorize = (
+      api as { authorizeMediaPath?: (p: string) => Promise<string> }
+    ).authorizeMediaPath;
+    if (typeof maybeAuthorize !== "function") {
+      return;
+    }
+    void maybeAuthorize(path)
+      .then((freshUrl) => {
+        if (!cancelled && freshUrl) {
+          setAuthorizedSrc({ path, src: freshUrl });
+        }
+      })
+      .catch(() => {
+        // Fallback synchronously computed url handles offline/mock cases; onError reports playback failures
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [path, reloadKey]);
+
+  const src =
+    authorizedSrc && authorizedSrc.path === path
+      ? authorizedSrc.src
+      : api.mediaUrl(path);
+
+  function handlePlaybackError(mediaError: MediaError | null) {
+    const maybeAuthorize = (
+      api as { authorizeMediaPath?: (p: string) => Promise<string> }
+    ).authorizeMediaPath;
+    if (!retriedAuth && typeof maybeAuthorize === "function") {
+      setRetriedAuth(true);
+      void maybeAuthorize(path)
+        .then((freshUrl) => {
+          if (freshUrl && freshUrl !== src) {
+            setAuthorizedSrc({ path, src: freshUrl });
+            setReloadKey((k) => k + 1);
+            setErrorMsg(null);
+          } else {
+            setErrorMsg(describeMediaError(mediaError));
+          }
+        })
+        .catch(() => {
+          setErrorMsg(describeMediaError(mediaError));
+        });
+      return;
+    }
+    setErrorMsg(describeMediaError(mediaError));
+  }
 
   return (
     <div className="space-y-1.5">
@@ -62,7 +117,7 @@ export const LocalMediaPlayer = forwardRef<
           onLoadedMetadata={() => setErrorMsg(null)}
           onTimeUpdate={(e) => onTimeUpdate?.(e.currentTarget.currentTime)}
           onSeeked={(e) => onTimeUpdate?.(e.currentTarget.currentTime)}
-          onError={(e) => setErrorMsg(describeMediaError(e.currentTarget.error))}
+          onError={(e) => handlePlaybackError(e.currentTarget.error)}
           className={className ?? "w-full"}
         />
       ) : (
@@ -71,11 +126,12 @@ export const LocalMediaPlayer = forwardRef<
           ref={(el) => assignMediaRef(ref, el)}
           src={src}
           controls
+          playsInline
           preload="metadata"
           onLoadedMetadata={() => setErrorMsg(null)}
           onTimeUpdate={(e) => onTimeUpdate?.(e.currentTarget.currentTime)}
           onSeeked={(e) => onTimeUpdate?.(e.currentTarget.currentTime)}
-          onError={(e) => setErrorMsg(describeMediaError(e.currentTarget.error))}
+          onError={(e) => handlePlaybackError(e.currentTarget.error)}
           className={
             className ??
             "aspect-video max-h-[280px] w-full rounded-lg bg-black object-contain"
@@ -99,6 +155,7 @@ export const LocalMediaPlayer = forwardRef<
               type="button"
               onClick={() => {
                 setErrorMsg(null);
+                setRetriedAuth(false);
                 setReloadKey((k) => k + 1);
               }}
               className="inline-flex items-center gap-1 rounded-md border border-amber-300 bg-white px-2 py-1 text-[11px] font-semibold text-amber-800 hover:bg-amber-100"

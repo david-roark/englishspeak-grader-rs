@@ -81,6 +81,28 @@ impl MediaServer {
         &self.token
     }
 
+    /// Registers an existing regular file path and builds an authorized loopback stream URL.
+    pub fn stream_url_for_path(&self, path: &Path) -> Option<String> {
+        let canonical = std::fs::canonicalize(path).ok()?;
+        if !canonical.is_file() {
+            return None;
+        }
+        self.authorize_path(&canonical);
+        let raw_path = path.to_string_lossy();
+        let file_name = path
+            .file_name()
+            .and_then(|s| s.to_str())
+            .filter(|s| !s.is_empty())
+            .unwrap_or("media");
+        Some(format!(
+            "{}/media/{}?token={}&path={}",
+            self.base_url(),
+            percent_encode(file_name),
+            percent_encode(&self.token),
+            percent_encode(&raw_path),
+        ))
+    }
+
     /// Registers an existing regular file path so the local media server may stream it.
     pub fn authorize_path(&self, path: &Path) {
         let Ok(canonical) = std::fs::canonicalize(path) else {
@@ -344,11 +366,19 @@ async fn handle_connection(
 
         let total_len = file.metadata().await?.len();
         let mime = mime_for_path(&file_path);
+        let mut close_after = req.close_requested;
+        let is_get = req.method == "GET";
 
         if let Some(range_val) = req.range_header.as_deref() {
             match parse_byte_range(range_val, total_len) {
                 Some((start, end)) => {
                     let content_len = end - start + 1;
+                    let resp_conn = if is_get {
+                        close_after = true;
+                        "close"
+                    } else {
+                        connection_hdr
+                    };
                     let headers = format!(
                         "HTTP/1.1 206 Partial Content\r\n\
                          Content-Type: {mime}\r\n\
@@ -357,15 +387,15 @@ async fn handle_connection(
                          Content-Length: {content_len}\r\n\
                          Access-Control-Allow-Origin: *\r\n\
                          Cache-Control: no-store\r\n\
-                         Connection: {connection_hdr}\r\n\r\n"
+                         Connection: {resp_conn}\r\n\r\n"
                     );
                     reader.get_mut().write_all(headers.as_bytes()).await?;
-                    if req.method == "GET" {
+                    if is_get {
                         file.seek(SeekFrom::Start(start)).await?;
                         let mut bounded = file.take(content_len);
-                        tokio::io::copy(&mut bounded, reader.get_mut()).await?;
+                        stream_body_ignoring_client_abort(&mut bounded, reader.get_mut()).await?;
                     }
-                    reader.get_mut().flush().await?;
+                    let _ = reader.get_mut().flush().await;
                 }
                 None => {
                     let resp = format!(
@@ -380,6 +410,12 @@ async fn handle_connection(
                 }
             }
         } else {
+            let resp_conn = if is_get {
+                close_after = true;
+                "close"
+            } else {
+                connection_hdr
+            };
             let headers = format!(
                 "HTTP/1.1 200 OK\r\n\
                  Content-Type: {mime}\r\n\
@@ -387,21 +423,42 @@ async fn handle_connection(
                  Content-Length: {total_len}\r\n\
                  Access-Control-Allow-Origin: *\r\n\
                  Cache-Control: no-store\r\n\
-                 Connection: {connection_hdr}\r\n\r\n"
+                 Connection: {resp_conn}\r\n\r\n"
             );
             reader.get_mut().write_all(headers.as_bytes()).await?;
-            if req.method == "GET" && total_len > 0 {
-                tokio::io::copy(&mut file, reader.get_mut()).await?;
+            if is_get && total_len > 0 {
+                stream_body_ignoring_client_abort(&mut file, reader.get_mut()).await?;
             }
-            reader.get_mut().flush().await?;
+            let _ = reader.get_mut().flush().await;
         }
 
-        if req.close_requested {
+        if close_after {
             break;
         }
     }
 
     Ok(())
+}
+
+async fn stream_body_ignoring_client_abort<R: tokio::io::AsyncRead + Unpin>(
+    src: &mut R,
+    dst: &mut TcpStream,
+) -> std::io::Result<()> {
+    match tokio::io::copy(src, dst).await {
+        Ok(_) => Ok(()),
+        Err(e)
+            if matches!(
+                e.kind(),
+                std::io::ErrorKind::BrokenPipe
+                    | std::io::ErrorKind::ConnectionReset
+                    | std::io::ErrorKind::ConnectionAborted
+                    | std::io::ErrorKind::UnexpectedEof
+            ) =>
+        {
+            Ok(())
+        }
+        Err(e) => Err(e),
+    }
 }
 
 fn resolve_authorized(
@@ -463,6 +520,19 @@ pub(crate) fn parse_query_params(target: &str) -> (Option<String>, Option<String
         }
     }
     (token, path)
+}
+
+fn percent_encode(s: &str) -> String {
+    let mut out = String::new();
+    for b in s.as_bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(*b as char)
+            }
+            _ => out.push_str(&format!("%{:02X}", b)),
+        }
+    }
+    out
 }
 
 /// Decodes `%XX` UTF-8 percent-encoded bytes without altering literal `+` characters,
@@ -635,17 +705,24 @@ mod tests {
         assert!(head_str.contains("Accept-Ranges: bytes"));
         assert_eq!(body, payload.as_slice());
 
+        let stream_url = server
+            .stream_url_for_path(&file_path)
+            .expect("stream url generated");
+        assert!(stream_url.contains("token="));
+        assert!(stream_url.contains("sample_video.mp4"));
+
         // 4. Byte-Range GET -> 206 Partial Content
         let res_range = send_http(
             server.port,
             &format!(
-                "GET /media/sample.mp4?token={}&path={encoded_path} HTTP/1.1\r\nHost: 127.0.0.1\r\nRange: bytes=10-19\r\nConnection: close\r\n\r\n",
+                "GET /media/sample.mp4?token={}&path={encoded_path} HTTP/1.1\r\nHost: 127.0.0.1\r\nRange: bytes=10-19\r\n\r\n",
                 server.token()
             ),
         );
         let (head_range, body_range) = split_http_response(&res_range);
         assert!(head_range.starts_with("HTTP/1.1 206 Partial Content"));
         assert!(head_range.contains("Content-Range: bytes 10-19/256"));
+        assert!(head_range.contains("Connection: close"));
         assert_eq!(body_range, &payload[10..20]);
 
         let _ = std::fs::remove_dir_all(&dir);
@@ -667,15 +744,6 @@ mod tests {
     }
 
     fn percent_encode_for_test(s: &str) -> String {
-        let mut out = String::new();
-        for b in s.as_bytes() {
-            match b {
-                b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' | b'/' => {
-                    out.push(*b as char)
-                }
-                _ => out.push_str(&format!("%{:02X}", b)),
-            }
-        }
-        out
+        percent_encode(s)
     }
 }

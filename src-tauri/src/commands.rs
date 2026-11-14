@@ -41,6 +41,13 @@ pub struct AppBootstrap {
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub struct AuthorizedMedia {
+    pub base_url: String,
+    pub token: String,
+    pub url: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct FileInfo {
     pub path: String,
     pub name: String,
@@ -241,6 +248,27 @@ fn parse_student_names(raw: &str) -> Vec<String> {
         .filter(|s| !s.is_empty())
         .map(String::from)
         .collect()
+}
+
+#[tauri::command]
+pub fn authorize_media_path(
+    state: State<'_, AppState>,
+    path: String,
+) -> Result<AuthorizedMedia, String> {
+    let trimmed = path.trim();
+    if trimmed.is_empty() {
+        return Err("Đường dẫn media trống.".into());
+    }
+    let p = Path::new(trimmed);
+    let url = state
+        .media_server
+        .stream_url_for_path(p)
+        .ok_or_else(|| format!("Không tìm thấy file media hợp lệ: {trimmed}"))?;
+    Ok(AuthorizedMedia {
+        base_url: state.media_server.base_url(),
+        token: state.media_server.token().to_string(),
+        url,
+    })
 }
 
 #[tauri::command]
