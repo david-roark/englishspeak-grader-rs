@@ -295,6 +295,9 @@ export const api = {
     profileId?: string;
     rubric?: Rubric;
     rubricId?: string;
+    gradingMode?: "rubric" | "flexible";
+    flexibleMaxScore?: number;
+    flexibleRoundingStep?: number | null;
     taskType: string;
     feedbackLang: string;
     studentNamesRaw: string;
@@ -305,6 +308,9 @@ export const api = {
       profileId: params.profileId ?? null,
       rubric: params.rubric ?? null,
       rubricId: params.rubricId ?? null,
+      gradingMode: params.gradingMode ?? null,
+      flexibleMaxScore: params.flexibleMaxScore ?? null,
+      flexibleRoundingStep: params.flexibleRoundingStep ?? null,
       taskType: params.taskType,
       feedbackLang: params.feedbackLang,
       studentNamesRaw: params.studentNamesRaw,

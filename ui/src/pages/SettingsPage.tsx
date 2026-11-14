@@ -1,7 +1,10 @@
 import { useState } from "react";
 import {
   Check,
+  FileText,
   FolderOpen,
+  Info,
+  KeyRound,
   Minus,
   Monitor,
   Moon,
@@ -38,10 +41,24 @@ interface SettingsPageProps {
   onBootstrapUpdated: (next: AppBootstrap) => void;
 }
 
+type SettingsTab = "system" | "appearance" | "prompt" | "about";
+
+const SETTINGS_TABS: {
+  id: SettingsTab;
+  label: string;
+  icon: typeof KeyRound;
+}[] = [
+  { id: "system", label: "Hệ thống & API", icon: KeyRound },
+  { id: "appearance", label: "Giao diện & Theme", icon: Palette },
+  { id: "prompt", label: "Cấu hình Prompt", icon: FileText },
+  { id: "about", label: "Thông tin & Nhật ký", icon: Info },
+];
+
 export function SettingsPage({
   bootstrap,
   onBootstrapUpdated,
 }: SettingsPageProps) {
+  const [activeTab, setActiveTab] = useState<SettingsTab>("system");
   const {
     mode,
     accent,
@@ -85,220 +102,48 @@ export function SettingsPage({
 
   return (
     <div className="space-y-4">
-      <div className="grid items-start gap-4 xl:grid-cols-12">
-        {/* Theme & Appearance Settings */}
-        <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-xs xl:col-span-5">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div>
-              <h2 className="flex items-center gap-2 text-base font-bold text-slate-900">
-                <Palette className="h-4 w-4 text-indigo-600" />
-                Giao diện &amp; Theme
-              </h2>
-              <p className="mt-0.5 text-xs text-slate-500">
-                Áp dụng tức thì và lưu tự động trên máy.
-              </p>
-            </div>
+      {/* Segmented Settings Navigation */}
+      <div className="flex flex-wrap gap-1.5 rounded-xl border border-slate-200 bg-slate-100 p-1">
+        {SETTINGS_TABS.map((t) => {
+          const Icon = t.icon;
+          const active = activeTab === t.id;
+          return (
             <button
+              key={t.id}
               type="button"
-              onClick={resetTheme}
-              className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50"
+              onClick={() => setActiveTab(t.id)}
+              className={`inline-flex flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-lg px-3 py-2 text-xs font-semibold transition ${
+                active
+                  ? "bg-white text-indigo-700 shadow-xs"
+                  : "text-slate-600 hover:text-slate-900"
+              }`}
             >
-              <RotateCcw className="h-3.5 w-3.5" />
-              Mặc định
-            </button>
-          </div>
-
-          <div className="mt-3">
-            <div className="text-xs font-semibold text-slate-600">
-              Chế độ hiển thị{" "}
-              {mode === "system" && (
-                <span className="font-normal text-slate-500">
-                  (Hệ thống: {resolvedMode === "dark" ? "Tối" : "Sáng"})
-                </span>
-              )}
-            </div>
-            <div className="mt-1.5 grid gap-2 sm:grid-cols-3">
-              {THEME_MODES.map((item) => {
-                const Icon = MODE_ICON_MAP[item.id];
-                const selected = mode === item.id;
-                return (
-                  <button
-                    key={item.id}
-                    type="button"
-                    onClick={() => setMode(item.id)}
-                    title={item.description}
-                    className={`flex items-center gap-2 rounded-xl border px-2.5 py-2 text-left transition ${
-                      selected
-                        ? "border-indigo-400 bg-indigo-50/70"
-                        : "border-slate-200 hover:bg-slate-50"
-                    }`}
-                  >
-                    <div
-                      className={`shrink-0 rounded-lg p-1.5 ${
-                        selected
-                          ? "bg-indigo-600 text-white"
-                          : "bg-slate-100 text-slate-600"
-                      }`}
-                    >
-                      <Icon className="h-3.5 w-3.5" />
-                    </div>
-                    <span className="min-w-0 flex-1 truncate text-xs font-semibold text-slate-900">
-                      {item.label}
-                    </span>
-                    {selected && (
-                      <Check className="h-3.5 w-3.5 shrink-0 text-indigo-600" />
-                    )}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          <div className="mt-3.5">
-            <div className="text-xs font-semibold text-slate-600">
-              Bảng màu chủ đạo
-            </div>
-            <div className="mt-1.5 grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-2 2xl:grid-cols-3">
-              {THEME_ACCENTS.map((item) => {
-                const selected = accent === item.id;
-                return (
-                  <button
-                    key={item.id}
-                    type="button"
-                    onClick={() => setAccent(item.id)}
-                    title={item.description}
-                    className={`flex items-center gap-2 rounded-xl border px-2.5 py-2 text-left transition ${
-                      selected
-                        ? "border-indigo-400 bg-indigo-50/70"
-                        : "border-slate-200 hover:bg-slate-50"
-                    }`}
-                  >
-                    <span
-                      className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-black/10"
-                      style={{ backgroundColor: item.swatch }}
-                    >
-                      {selected && <Check className="h-3 w-3 text-white" />}
-                    </span>
-                    <div className="min-w-0">
-                      <div className="truncate text-xs font-semibold text-slate-900">
-                        {item.label}
-                      </div>
-                      <div className="truncate text-[11px] text-slate-500">
-                        {item.description}
-                      </div>
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Font Size Controls */}
-          <div className="mt-3.5">
-            <div className="flex items-center justify-between gap-2">
-              <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-600">
-                <Type className="h-3.5 w-3.5 text-indigo-600" />
-                Kích thước font chữ
-              </span>
-              <span className="rounded bg-indigo-50 px-2 py-0.5 font-mono text-[11px] font-bold text-indigo-700">
-                {fontSize} px
-              </span>
-            </div>
-
-            <div className="mt-1.5 flex items-center gap-2">
-              <button
-                type="button"
-                disabled={fontSize <= MIN_FONT_SIZE}
-                onClick={() => stepFontSize(-1)}
-                className="inline-flex items-center gap-0.5 rounded-lg border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-40"
-                title="Giảm cỡ chữ"
-              >
-                <Minus className="h-3 w-3" />
-                A
-              </button>
-              <input
-                type="range"
-                min={MIN_FONT_SIZE}
-                max={MAX_FONT_SIZE}
-                step={1}
-                value={fontSize}
-                onChange={(e) => setFontSize(Number(e.target.value))}
-                aria-label="Kích thước font chữ"
-                className="min-w-0 flex-1 accent-indigo-600"
+              <Icon
+                className={`h-3.5 w-3.5 shrink-0 ${
+                  active ? "text-indigo-600" : "text-slate-400"
+                }`}
               />
-              <button
-                type="button"
-                disabled={fontSize >= MAX_FONT_SIZE}
-                onClick={() => stepFontSize(1)}
-                className="inline-flex items-center gap-0.5 rounded-lg border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-40"
-                title="Tăng cỡ chữ"
-              >
-                <Plus className="h-3 w-3" />
-                A
-              </button>
-            </div>
+              <span>{t.label}</span>
+            </button>
+          );
+        })}
+      </div>
 
-            <div className="mt-2 grid grid-cols-4 gap-1.5">
-              {FONT_SIZE_PRESETS.map((p) => {
-                const selected = fontSize === p.size;
-                return (
-                  <button
-                    key={p.size}
-                    type="button"
-                    onClick={() => setFontSize(p.size)}
-                    title={p.description}
-                    className={`rounded-lg border px-2 py-1.5 text-center transition ${
-                      selected
-                        ? "border-indigo-400 bg-indigo-50 font-semibold text-indigo-800"
-                        : "border-slate-200 text-slate-700 hover:bg-slate-50"
-                    }`}
-                  >
-                    <div className="text-xs">{p.label}</div>
-                    <div className="font-mono text-[10px] text-slate-500">
-                      {p.size}px
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
+      {/* Tab 1: System & API Settings */}
+      {activeTab === "system" && (
+        <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-xs">
+          <div className="border-b border-slate-100 pb-3">
+            <h2 className="flex items-center gap-2 text-base font-bold text-slate-900">
+              <KeyRound className="h-4 w-4 text-indigo-600" />
+              Cài đặt hệ thống &amp; Gemini API
+            </h2>
+            <p className="mt-0.5 text-xs text-slate-500 break-all">
+              Database SQLite: <code>{bootstrap.db_path}</code>{" "}
+              ({bootstrap.is_portable ? "Chế độ Portable" : "Thư mục chuẩn hệ điều hành"})
+            </p>
           </div>
 
-          {/* Live Theme Preview */}
-          <div className="mt-3.5 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
-            <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
-              <span className="font-semibold text-slate-700">Thử màu:</span>
-              <span className="rounded-full bg-indigo-50 px-2 py-0.5 font-medium text-indigo-700">
-                Nổi bật
-              </span>
-              <span className="rounded-full bg-emerald-50 px-2 py-0.5 font-medium text-emerald-700">
-                Tốt
-              </span>
-              <span className="rounded-full bg-amber-50 px-2 py-0.5 font-medium text-amber-800">
-                Lưu ý
-              </span>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <span className="rounded-lg border border-indigo-200 bg-white px-2 py-0.5 text-[11px] font-semibold text-indigo-700">
-                Phụ
-              </span>
-              <span className="rounded-lg bg-indigo-600 px-2.5 py-0.5 text-[11px] font-bold text-white">
-                Chính
-              </span>
-            </div>
-          </div>
-        </div>
-
-        {/* System & API Settings */}
-        <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-xs xl:col-span-7">
-          <h2 className="text-base font-bold text-slate-900">
-            Cài đặt hệ thống &amp; Gemini API
-          </h2>
-          <p className="mt-0.5 text-xs text-slate-500 break-all">
-            Database SQLite: <code>{bootstrap.db_path}</code>{" "}
-            ({bootstrap.is_portable ? "Chế độ Portable" : "Thư mục chuẩn hệ điều hành"})
-          </p>
-
-          <div className="mt-3 grid gap-3 md:grid-cols-2">
+          <div className="mt-4 grid gap-3.5 md:grid-cols-2">
             <div>
               <label className="block text-xs font-semibold text-slate-600">
                 Gemini API Key{" "}
@@ -415,17 +260,17 @@ export function SettingsPage({
           </div>
 
           {settingsErr && (
-            <div className="mt-3 rounded bg-rose-50 px-3 py-2 text-xs text-rose-700">
+            <div className="mt-3 rounded-lg bg-rose-50 px-3 py-2 text-xs text-rose-700">
               ⚠️ {settingsErr}
             </div>
           )}
           {settingsMsg && (
-            <div className="mt-3 rounded bg-emerald-50 px-3 py-2 text-xs text-emerald-700">
+            <div className="mt-3 rounded-lg bg-emerald-50 px-3 py-2 text-xs text-emerald-700">
               {settingsMsg}
             </div>
           )}
 
-          <div className="mt-3 flex justify-end">
+          <div className="mt-4 flex justify-end border-t border-slate-100 pt-3">
             <button
               type="button"
               onClick={() => void handleSaveAppSettings(false)}
@@ -436,16 +281,228 @@ export function SettingsPage({
             </button>
           </div>
         </div>
-      </div>
+      )}
 
-      {/* Prompt Profile Editor */}
-      <PromptConfigSection
-        bootstrap={bootstrap}
-        onBootstrapUpdated={onBootstrapUpdated}
-      />
+      {/* Tab 2: Theme & Appearance Settings */}
+      {activeTab === "appearance" && (
+        <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-xs">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-3">
+            <div>
+              <h2 className="flex items-center gap-2 text-base font-bold text-slate-900">
+                <Palette className="h-4 w-4 text-indigo-600" />
+                Giao diện &amp; Theme
+              </h2>
+              <p className="mt-0.5 text-xs text-slate-500">
+                Áp dụng tức thì và lưu tự động trên máy.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={resetTheme}
+              className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50"
+            >
+              <RotateCcw className="h-3.5 w-3.5" />
+              Mặc định
+            </button>
+          </div>
 
-      {/* About, Environment & Activity Log */}
-      <AboutDiagnosticsSection />
+          <div className="mt-4 grid gap-5 lg:grid-cols-2">
+            <div className="space-y-4">
+              <div>
+                <div className="text-xs font-semibold text-slate-600">
+                  Chế độ hiển thị{" "}
+                  {mode === "system" && (
+                    <span className="font-normal text-slate-500">
+                      (Hệ thống: {resolvedMode === "dark" ? "Tối" : "Sáng"})
+                    </span>
+                  )}
+                </div>
+                <div className="mt-1.5 grid gap-2 sm:grid-cols-3">
+                  {THEME_MODES.map((item) => {
+                    const Icon = MODE_ICON_MAP[item.id];
+                    const selected = mode === item.id;
+                    return (
+                      <button
+                        key={item.id}
+                        type="button"
+                        onClick={() => setMode(item.id)}
+                        title={item.description}
+                        className={`flex items-center gap-2 rounded-xl border px-2.5 py-2 text-left transition ${
+                          selected
+                            ? "border-indigo-400 bg-indigo-50/70"
+                            : "border-slate-200 hover:bg-slate-50"
+                        }`}
+                      >
+                        <div
+                          className={`shrink-0 rounded-lg p-1.5 ${
+                            selected
+                              ? "bg-indigo-600 text-white"
+                              : "bg-slate-100 text-slate-600"
+                          }`}
+                        >
+                          <Icon className="h-3.5 w-3.5" />
+                        </div>
+                        <span className="min-w-0 flex-1 truncate text-xs font-semibold text-slate-900">
+                          {item.label}
+                        </span>
+                        {selected && (
+                          <Check className="h-3.5 w-3.5 shrink-0 text-indigo-600" />
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div>
+                <div className="text-xs font-semibold text-slate-600">
+                  Bảng màu chủ đạo
+                </div>
+                <div className="mt-1.5 grid grid-cols-2 gap-2 sm:grid-cols-3">
+                  {THEME_ACCENTS.map((item) => {
+                    const selected = accent === item.id;
+                    return (
+                      <button
+                        key={item.id}
+                        type="button"
+                        onClick={() => setAccent(item.id)}
+                        title={item.description}
+                        className={`flex items-center gap-2 rounded-xl border px-2.5 py-2 text-left transition ${
+                          selected
+                            ? "border-indigo-400 bg-indigo-50/70"
+                            : "border-slate-200 hover:bg-slate-50"
+                        }`}
+                      >
+                        <span
+                          className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-black/10"
+                          style={{ backgroundColor: item.swatch }}
+                        >
+                          {selected && <Check className="h-3 w-3 text-white" />}
+                        </span>
+                        <div className="min-w-0">
+                          <div className="truncate text-xs font-semibold text-slate-900">
+                            {item.label}
+                          </div>
+                          <div className="truncate text-[11px] text-slate-500">
+                            {item.description}
+                          </div>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              {/* Font Size Controls */}
+              <div>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-600">
+                    <Type className="h-3.5 w-3.5 text-indigo-600" />
+                    Kích thước font chữ
+                  </span>
+                  <span className="rounded bg-indigo-50 px-2 py-0.5 font-mono text-[11px] font-bold text-indigo-700">
+                    {fontSize} px
+                  </span>
+                </div>
+
+                <div className="mt-1.5 flex items-center gap-2">
+                  <button
+                    type="button"
+                    disabled={fontSize <= MIN_FONT_SIZE}
+                    onClick={() => stepFontSize(-1)}
+                    className="inline-flex items-center gap-0.5 rounded-lg border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+                    title="Giảm cỡ chữ"
+                  >
+                    <Minus className="h-3 w-3" />
+                    A
+                  </button>
+                  <input
+                    type="range"
+                    min={MIN_FONT_SIZE}
+                    max={MAX_FONT_SIZE}
+                    step={1}
+                    value={fontSize}
+                    onChange={(e) => setFontSize(Number(e.target.value))}
+                    aria-label="Kích thước font chữ"
+                    className="min-w-0 flex-1 accent-indigo-600"
+                  />
+                  <button
+                    type="button"
+                    disabled={fontSize >= MAX_FONT_SIZE}
+                    onClick={() => stepFontSize(1)}
+                    className="inline-flex items-center gap-0.5 rounded-lg border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+                    title="Tăng cỡ chữ"
+                  >
+                    <Plus className="h-3 w-3" />
+                    A
+                  </button>
+                </div>
+
+                <div className="mt-2 grid grid-cols-4 gap-1.5">
+                  {FONT_SIZE_PRESETS.map((p) => {
+                    const selected = fontSize === p.size;
+                    return (
+                      <button
+                        key={p.size}
+                        type="button"
+                        onClick={() => setFontSize(p.size)}
+                        title={p.description}
+                        className={`rounded-lg border px-2 py-1.5 text-center transition ${
+                          selected
+                            ? "border-indigo-400 bg-indigo-50 font-semibold text-indigo-800"
+                            : "border-slate-200 text-slate-700 hover:bg-slate-50"
+                        }`}
+                      >
+                        <div className="text-xs">{p.label}</div>
+                        <div className="font-mono text-[10px] text-slate-500">
+                          {p.size}px
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Live Theme Preview */}
+              <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5">
+                <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
+                  <span className="font-semibold text-slate-700">Thử màu:</span>
+                  <span className="rounded-full bg-indigo-50 px-2 py-0.5 font-medium text-indigo-700">
+                    Nổi bật
+                  </span>
+                  <span className="rounded-full bg-emerald-50 px-2 py-0.5 font-medium text-emerald-700">
+                    Tốt
+                  </span>
+                  <span className="rounded-full bg-amber-50 px-2 py-0.5 font-medium text-amber-800">
+                    Lưu ý
+                  </span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span className="rounded-lg border border-indigo-200 bg-white px-2 py-0.5 text-[11px] font-semibold text-indigo-700">
+                    Phụ
+                  </span>
+                  <span className="rounded-lg bg-indigo-600 px-2.5 py-0.5 text-[11px] font-bold text-white">
+                    Chính
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Tab 3: Prompt Profile Editor */}
+      {activeTab === "prompt" && (
+        <PromptConfigSection
+          bootstrap={bootstrap}
+          onBootstrapUpdated={onBootstrapUpdated}
+        />
+      )}
+
+      {/* Tab 4: About, Environment & Activity Log */}
+      {activeTab === "about" && <AboutDiagnosticsSection />}
     </div>
   );
 }

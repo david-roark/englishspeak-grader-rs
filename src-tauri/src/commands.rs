@@ -1465,6 +1465,9 @@ pub fn preview_grading_prompt(
     profile_id: Option<String>,
     rubric: Option<Rubric>,
     rubric_id: Option<String>,
+    grading_mode: Option<String>,
+    flexible_max_score: Option<f64>,
+    flexible_rounding_step: Option<f64>,
     task_type: String,
     feedback_lang: String,
     student_names_raw: String,
@@ -1485,20 +1488,43 @@ pub fn preview_grading_prompt(
             None => state.db.load_prompt_profile().map_err(|e| e.to_string())?,
         },
     };
-    let resolved_rubric = match rubric {
-        Some(r) => r,
-        None => {
-            let rid = rubric_id
-                .as_deref()
-                .map(str::trim)
-                .filter(|s| !s.is_empty())
-                .ok_or_else(|| "Thiếu rubric hoặc rubric_id để xem trước.".to_string())?;
-            state
-                .db
-                .get_rubric(rid)
-                .map_err(|e| e.to_string())?
-                .ok_or_else(|| format!("Không tìm thấy rubric '{rid}'."))?
-        }
+    let is_flexible = grading_mode.as_deref() == Some("flexible");
+    let (resolved_rubric, extra_for_prompt) = if is_flexible {
+        let max_score = flexible_max_score
+            .filter(|v| v.is_finite() && *v > 0.0)
+            .unwrap_or(10.0);
+        let default_flex_name = format!("Chấm linh hoạt (Thang {})", fmt_num(max_score));
+        let sample_instructions = if extra_instructions.trim().is_empty() {
+            "Chấm bài nói theo đề bài và tiêu chí của giáo viên."
+        } else {
+            extra_instructions.as_str()
+        };
+        (
+            Rubric::flexible(
+                &default_flex_name,
+                sample_instructions,
+                max_score,
+                flexible_rounding_step,
+            ),
+            "",
+        )
+    } else {
+        let loaded = match rubric {
+            Some(r) => r,
+            None => {
+                let rid = rubric_id
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .ok_or_else(|| "Thiếu rubric hoặc rubric_id để xem trước.".to_string())?;
+                state
+                    .db
+                    .get_rubric(rid)
+                    .map_err(|e| e.to_string())?
+                    .ok_or_else(|| format!("Không tìm thấy rubric '{rid}'."))?
+            }
+        };
+        (loaded, extra_instructions.as_str())
     };
     let student_names = parse_student_names(&student_names_raw);
     let names_opt = (!student_names.is_empty()).then_some(student_names.as_slice());
@@ -1508,7 +1534,7 @@ pub fn preview_grading_prompt(
         &task_type,
         &feedback_lang,
         names_opt,
-        &extra_instructions,
+        extra_for_prompt,
     ))
 }
 

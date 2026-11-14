@@ -65,11 +65,15 @@ export function PromptConfigSection({
   const [cloneName, setCloneName] = useState("");
   const [cloneTemplate, setCloneTemplate] = useState<"copy" | "strict_exam" | "encouraging">("copy");
 
-  // Live preview state
-  const [previewOpen, setPreviewOpen] = useState(false);
+  // Editor section tab & live preview state
+  type EditorTab = "general" | "rules" | "context" | "preview";
+  const [editorTab, setEditorTab] = useState<EditorTab>("general");
+  const previewOpen = editorTab === "preview";
   const [previewRubricId, setPreviewRubricId] = useState(
-    bootstrap.rubrics[0]?.id ?? "ielts_speaking"
+    "__flexible__"
   );
+  const [previewFlexMaxScore, setPreviewFlexMaxScore] = useState<number>(10);
+  const [previewFlexRounding, setPreviewFlexRounding] = useState<string>("0.5");
   const [previewTaskType, setPreviewTaskType] = useState("presentation");
   const [previewLang, setPreviewLang] = useState("vi");
   const [previewNames, setPreviewNames] = useState("Nguyễn Minh Anh, Trần Gia Bảo");
@@ -109,12 +113,20 @@ export function PromptConfigSection({
     const timer = window.setTimeout(async () => {
       setPreviewLoading(true);
       try {
+        const isFlex = previewRubricId === "__flexible__";
+        const parsedRounding =
+          previewFlexRounding.trim() === ""
+            ? null
+            : Number(previewFlexRounding);
         const res = await api.previewGradingPrompt({
           profile: {
             ...draft,
             grading_rules: normalizeRules(draft.grading_rules),
           },
-          rubricId: previewRubricId,
+          rubricId: isFlex ? undefined : previewRubricId,
+          gradingMode: isFlex ? "flexible" : "rubric",
+          flexibleMaxScore: isFlex ? previewFlexMaxScore : undefined,
+          flexibleRoundingStep: isFlex ? parsedRounding : undefined,
           taskType: previewTaskType,
           feedbackLang: previewLang,
           studentNamesRaw: previewNames,
@@ -136,6 +148,8 @@ export function PromptConfigSection({
     previewOpen,
     draft,
     previewRubricId,
+    previewFlexMaxScore,
+    previewFlexRounding,
     previewTaskType,
     previewLang,
     previewNames,
@@ -340,7 +354,9 @@ export function PromptConfigSection({
         <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
-            onClick={() => setPreviewOpen((v) => !v)}
+            onClick={() =>
+              setEditorTab((prev) => (prev === "preview" ? "general" : "preview"))
+            }
             className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors ${
               previewOpen
                 ? "border-indigo-300 bg-indigo-50 text-indigo-700"
@@ -348,7 +364,7 @@ export function PromptConfigSection({
             }`}
           >
             {previewOpen ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
-            {previewOpen ? "Ẩn xem trước" : "Xem trước Prompt"}
+            {previewOpen ? "Quay lại chỉnh sửa" : "Xem trước Prompt"}
           </button>
 
           {draft.id === "default" ? (
@@ -509,271 +525,310 @@ export function PromptConfigSection({
         </div>
       )}
 
-      {/* Calibration Row: Strictness & Temperature */}
-      <div className="mt-4 grid gap-3 rounded-xl border border-slate-200 bg-slate-50/50 p-3 md:grid-cols-2">
-        <div>
-          <label className="block text-xs font-semibold text-slate-700">
-            Mức độ khắt khe khi chấm
-          </label>
-          <SelectField
-            value={draft.strictness}
-            onChange={(val) => setDraft({ ...draft, strictness: val })}
-            options={STRICTNESS_OPTIONS}
-            size="sm"
-            className="mt-1 w-full"
-            ariaLabel="Mức độ khắt khe khi chấm"
-          />
-        </div>
-
-        <div>
-          <div className="flex items-center justify-between gap-2">
-            <label className="text-xs font-semibold text-slate-700">
-              Độ ổn định điểm (Temperature)
-            </label>
-            <span className="rounded bg-indigo-50 px-2 py-0.5 font-mono text-[11px] font-bold text-indigo-700">
-              {draft.temperature.toFixed(2)}
-            </span>
-          </div>
-          <div className="mt-1.5 flex flex-wrap items-center gap-2">
-            <input
-              type="range"
-              min={0}
-              max={0.8}
-              step={0.05}
-              value={draft.temperature}
-              onChange={(e) =>
-                setDraft({ ...draft, temperature: Number(e.target.value) })
-              }
-              className="min-w-[120px] flex-1 accent-indigo-600"
-            />
-            <div className="flex flex-wrap gap-1">
-              {TEMP_PRESETS.map((tp) => {
-                const active = Math.abs(draft.temperature - tp.value) < 0.01;
-                return (
-                  <button
-                    key={tp.value}
-                    type="button"
-                    onClick={() => setDraft({ ...draft, temperature: tp.value })}
-                    className={`rounded-md border px-2 py-0.5 text-[11px] font-medium transition-colors ${
-                      active
-                        ? "border-indigo-500 bg-indigo-50 text-indigo-700"
-                        : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
-                    }`}
-                  >
-                    {tp.label}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        </div>
+      {/* Editor Section Sub-tabs */}
+      <div className="mt-4 flex flex-wrap gap-1.5 rounded-xl border border-slate-200 bg-slate-100 p-1">
+        {(
+          [
+            { id: "general", label: "1. Vai trò & Độ khắt khe" },
+            { id: "rules", label: `2. Quy tắc chấm (${draft.grading_rules.length})` },
+            { id: "context", label: "3. Tên HS & Ngôn ngữ" },
+            { id: "preview", label: "4. Xem trước Prompt" },
+          ] as { id: EditorTab; label: string }[]
+        ).map((t) => {
+          const active = editorTab === t.id;
+          return (
+            <button
+              key={t.id}
+              type="button"
+              onClick={() => setEditorTab(t.id)}
+              className={`flex-1 whitespace-nowrap rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
+                active
+                  ? "bg-white text-indigo-700 shadow-xs"
+                  : "text-slate-600 hover:text-slate-900"
+              }`}
+            >
+              {t.label}
+              {t.id === "context" && missingNamesPlaceholder && (
+                <span className="ml-1.5 inline-block h-1.5 w-1.5 rounded-full bg-amber-500" title="Thiếu biến {names}" />
+              )}
+            </button>
+          );
+        })}
       </div>
 
-      {/* Prompt Fields */}
-      <div className="mt-4 grid gap-4 xl:grid-cols-12">
-        <div className="space-y-3.5 xl:col-span-7">
+      {/* Tab 1: General Calibration & systemInstruction */}
+      {editorTab === "general" && (
+        <div className="mt-4 space-y-4">
+          <div className="grid gap-3 rounded-xl border border-slate-200 bg-slate-50/50 p-3.5 md:grid-cols-2">
+            <div>
+              <label className="block text-xs font-semibold text-slate-700">
+                Mức độ khắt khe khi chấm
+              </label>
+              <SelectField
+                value={draft.strictness}
+                onChange={(val) => setDraft({ ...draft, strictness: val })}
+                options={STRICTNESS_OPTIONS}
+                size="sm"
+                className="mt-1 w-full"
+                ariaLabel="Mức độ khắt khe khi chấm"
+              />
+            </div>
+
+            <div>
+              <div className="flex items-center justify-between gap-2">
+                <label className="text-xs font-semibold text-slate-700">
+                  Độ ổn định điểm (Temperature)
+                </label>
+                <span className="rounded bg-indigo-50 px-2 py-0.5 font-mono text-[11px] font-bold text-indigo-700">
+                  {draft.temperature.toFixed(2)}
+                </span>
+              </div>
+              <div className="mt-1.5 flex flex-wrap items-center gap-2">
+                <input
+                  type="range"
+                  min={0}
+                  max={0.8}
+                  step={0.05}
+                  value={draft.temperature}
+                  onChange={(e) =>
+                    setDraft({ ...draft, temperature: Number(e.target.value) })
+                  }
+                  className="min-w-[120px] flex-1 accent-indigo-600"
+                />
+                <div className="flex flex-wrap gap-1">
+                  {TEMP_PRESETS.map((tp) => {
+                    const active = Math.abs(draft.temperature - tp.value) < 0.01;
+                    return (
+                      <button
+                        key={tp.value}
+                        type="button"
+                        onClick={() => setDraft({ ...draft, temperature: tp.value })}
+                        className={`rounded-md border px-2 py-0.5 text-[11px] font-medium transition-colors ${
+                          active
+                            ? "border-indigo-500 bg-indigo-50 text-indigo-700"
+                            : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                        }`}
+                      >
+                        {tp.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          </div>
+
           <div>
             <label className="block text-xs font-semibold text-slate-600">
               Vai trò &amp; Nhiệm vụ hệ thống (<code>systemInstruction</code>)
             </label>
             <textarea
-              rows={3}
+              rows={4}
               value={draft.system_instruction}
               onChange={(e) =>
                 setDraft({ ...draft, system_instruction: e.target.value })
               }
-              className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-indigo-400 focus:outline-none"
+              className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm leading-relaxed focus:border-indigo-400 focus:outline-none"
             />
           </div>
+        </div>
+      )}
 
-          <div>
-            <label className="block text-xs font-semibold text-slate-600">
-              Chỉ dẫn khi có danh sách tên học sinh (biến <code>{"{names}"}</code>)
+      {/* Tab 2: Structured Grading Rules */}
+      {editorTab === "rules" && (
+        <div className="mt-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <label className="text-xs font-semibold text-slate-600">
+              Yêu cầu chấm bài chi tiết ({draft.grading_rules.length} quy tắc, hỗ trợ{" "}
+              <code>{"{lang_instr}"}</code>)
             </label>
-            <textarea
-              rows={2}
-              value={draft.names_with_list}
-              onChange={(e) =>
-                setDraft({ ...draft, names_with_list: e.target.value })
-              }
-              className={`mt-1 w-full rounded-lg border px-3 py-2 text-sm focus:outline-none ${
-                missingNamesPlaceholder
-                  ? "border-amber-400 focus:border-amber-500"
-                  : "border-slate-200 focus:border-indigo-400"
-              }`}
-            />
-            {missingNamesPlaceholder && (
-              <div className="mt-1 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-[11px] text-amber-800">
-                <span className="inline-flex items-center gap-1">
-                  <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
-                  Đang thiếu biến <code>{"{names}"}</code> — danh sách tên giáo viên nhập sẽ không được đưa vào prompt.
+            <button
+              type="button"
+              onClick={() => addRule("")}
+              className="inline-flex items-center gap-1 rounded-lg border border-indigo-200 bg-indigo-50 px-2.5 py-1 text-xs font-semibold text-indigo-700 hover:bg-indigo-100"
+            >
+              <Plus className="h-3.5 w-3.5" />
+              Thêm yêu cầu
+            </button>
+          </div>
+
+          <div className="mt-2.5 space-y-2">
+            {draft.grading_rules.map((rule, idx) => (
+              <div key={idx} className="flex items-start gap-2">
+                <span className="mt-2 w-5 shrink-0 text-right font-mono text-[11px] font-semibold text-slate-400">
+                  {idx + 1}.
                 </span>
-                <button
-                  type="button"
-                  onClick={() =>
-                    setDraft({
-                      ...draft,
-                      names_with_list: `${draft.names_with_list.trim()} {names}`.trim(),
-                    })
-                  }
-                  className="rounded border border-amber-300 bg-white px-2 py-0.5 font-semibold text-amber-900 hover:bg-amber-100"
-                >
-                  + Chèn {"{names}"}
-                </button>
+                <input
+                  type="text"
+                  value={rule}
+                  onChange={(e) => updateRule(idx, e.target.value)}
+                  placeholder="Nhập một yêu cầu chấm bài..."
+                  className="min-w-0 flex-1 rounded-lg border border-slate-200 px-3 py-1.5 text-xs text-slate-800 focus:border-indigo-400 focus:outline-none"
+                />
+                <div className="flex shrink-0 items-center gap-0.5 pt-0.5">
+                  <button
+                    type="button"
+                    disabled={idx === 0}
+                    onClick={() => moveRule(idx, -1)}
+                    className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700 disabled:opacity-30"
+                    title="Đưa lên"
+                  >
+                    <ArrowUp className="h-3.5 w-3.5" />
+                  </button>
+                  <button
+                    type="button"
+                    disabled={idx === draft.grading_rules.length - 1}
+                    onClick={() => moveRule(idx, 1)}
+                    className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700 disabled:opacity-30"
+                    title="Đưa xuống"
+                  >
+                    <ArrowDown className="h-3.5 w-3.5" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => removeRule(idx)}
+                    className="rounded p-1 text-slate-400 hover:bg-rose-50 hover:text-rose-600"
+                    title="Xóa dòng"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                </div>
               </div>
-            )}
+            ))}
           </div>
 
-          <div>
-            <label className="block text-xs font-semibold text-slate-600">
-              Chỉ dẫn khi AI tự phát hiện tên học sinh
-            </label>
-            <textarea
-              rows={3}
-              value={draft.names_auto_detect}
-              onChange={(e) =>
-                setDraft({ ...draft, names_auto_detect: e.target.value })
-              }
-              className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-indigo-400 focus:outline-none"
-            />
-          </div>
-
-          {/* Structured Grading Rules */}
-          <div>
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <label className="text-xs font-semibold text-slate-600">
-                Yêu cầu chấm bài chi tiết ({draft.grading_rules.length} quy tắc, hỗ trợ{" "}
-                <code>{"{lang_instr}"}</code>)
-              </label>
+          {missingLangPlaceholder && (
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-[11px] text-slate-600">
+              <span>
+                Chưa có dòng chứa <code>{"{lang_instr}"}</code> — hệ thống sẽ tự nối thêm vào cuối danh sách yêu cầu.
+              </span>
               <button
                 type="button"
-                onClick={() => addRule("")}
-                className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-50"
+                onClick={() => addRule("NGÔN NGỮ NHẬN XÉT: {lang_instr}")}
+                className="rounded border border-slate-200 bg-white px-2.5 py-1 font-semibold text-slate-700 hover:bg-slate-100"
               >
-                <Plus className="h-3 w-3" />
-                Thêm yêu cầu
+                + Chèn {"{lang_instr}"}
               </button>
             </div>
+          )}
+        </div>
+      )}
 
-            <div className="mt-1.5 space-y-1.5">
-              {draft.grading_rules.map((rule, idx) => (
-                <div key={idx} className="flex items-start gap-1.5">
-                  <span className="mt-2 w-5 shrink-0 text-right font-mono text-[11px] font-semibold text-slate-400">
-                    {idx + 1}.
+      {/* Tab 3: Student Names, Task Types & Feedback Languages */}
+      {editorTab === "context" && (
+        <div className="mt-4 grid gap-4 xl:grid-cols-12">
+          <div className="space-y-3.5 xl:col-span-6">
+            <div>
+              <label className="block text-xs font-semibold text-slate-600">
+                Chỉ dẫn khi có danh sách tên học sinh (biến <code>{"{names}"}</code>)
+              </label>
+              <textarea
+                rows={3}
+                value={draft.names_with_list}
+                onChange={(e) =>
+                  setDraft({ ...draft, names_with_list: e.target.value })
+                }
+                className={`mt-1 w-full rounded-lg border px-3 py-2 text-sm focus:outline-none ${
+                  missingNamesPlaceholder
+                    ? "border-amber-400 focus:border-amber-500"
+                    : "border-slate-200 focus:border-indigo-400"
+                }`}
+              />
+              {missingNamesPlaceholder && (
+                <div className="mt-1 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-[11px] text-amber-800">
+                  <span className="inline-flex items-center gap-1">
+                    <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                    Đang thiếu biến <code>{"{names}"}</code> — danh sách tên giáo viên nhập sẽ không được đưa vào prompt.
                   </span>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setDraft({
+                        ...draft,
+                        names_with_list: `${draft.names_with_list.trim()} {names}`.trim(),
+                      })
+                    }
+                    className="rounded border border-amber-300 bg-white px-2 py-0.5 font-semibold text-amber-900 hover:bg-amber-100"
+                  >
+                    + Chèn {"{names}"}
+                  </button>
+                </div>
+              )}
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-600">
+                Chỉ dẫn khi AI tự phát hiện tên học sinh
+              </label>
+              <textarea
+                rows={4}
+                value={draft.names_auto_detect}
+                onChange={(e) =>
+                  setDraft({ ...draft, names_auto_detect: e.target.value })
+                }
+                className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-indigo-400 focus:outline-none"
+              />
+            </div>
+          </div>
+
+          <div className="space-y-4 xl:col-span-6">
+            <div className="space-y-2.5 rounded-xl border border-slate-200 bg-slate-50/40 p-3">
+              <h3 className="text-xs font-bold uppercase tracking-wide text-slate-600">
+                Mô tả theo Loại bài nói
+              </h3>
+              {Object.entries(TASK_LABELS).map(([k, label]) => (
+                <div key={k}>
+                  <label className="block text-xs font-medium text-slate-600">
+                    {label}
+                  </label>
                   <input
                     type="text"
-                    value={rule}
-                    onChange={(e) => updateRule(idx, e.target.value)}
-                    placeholder="Nhập một yêu cầu chấm bài..."
-                    className="min-w-0 flex-1 rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs text-slate-800 focus:border-indigo-400 focus:outline-none"
+                    value={draft.task_types[k] ?? ""}
+                    onChange={(e) =>
+                      setDraft({
+                        ...draft,
+                        task_types: { ...draft.task_types, [k]: e.target.value },
+                      })
+                    }
+                    className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs"
                   />
-                  <div className="flex shrink-0 items-center gap-0.5 pt-0.5">
-                    <button
-                      type="button"
-                      disabled={idx === 0}
-                      onClick={() => moveRule(idx, -1)}
-                      className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700 disabled:opacity-30"
-                      title="Đưa lên"
-                    >
-                      <ArrowUp className="h-3.5 w-3.5" />
-                    </button>
-                    <button
-                      type="button"
-                      disabled={idx === draft.grading_rules.length - 1}
-                      onClick={() => moveRule(idx, 1)}
-                      className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700 disabled:opacity-30"
-                      title="Đưa xuống"
-                    >
-                      <ArrowDown className="h-3.5 w-3.5" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => removeRule(idx)}
-                      className="rounded p-1 text-slate-400 hover:bg-rose-50 hover:text-rose-600"
-                      title="Xóa dòng"
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
                 </div>
               ))}
             </div>
 
-            {missingLangPlaceholder && (
-              <div className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-[11px] text-slate-600">
-                <span>
-                  Chưa có dòng chứa <code>{"{lang_instr}"}</code> — hệ thống sẽ tự nối thêm vào cuối danh sách yêu cầu.
-                </span>
-                <button
-                  type="button"
-                  onClick={() => addRule("NGÔN NGỮ NHẬN XÉT: {lang_instr}")}
-                  className="rounded border border-slate-200 bg-white px-2 py-0.5 font-semibold text-slate-700 hover:bg-slate-100"
-                >
-                  + Chèn {"{lang_instr}"}
-                </button>
-              </div>
-            )}
+            <div className="space-y-2.5 rounded-xl border border-slate-200 bg-slate-50/40 p-3">
+              <h3 className="text-xs font-bold uppercase tracking-wide text-slate-600">
+                Chỉ dẫn theo Ngôn ngữ nhận xét
+              </h3>
+              {Object.entries(LANG_LABELS).map(([k, label]) => (
+                <div key={k}>
+                  <label className="block text-xs font-medium text-slate-600">
+                    {label}
+                  </label>
+                  <input
+                    type="text"
+                    value={draft.feedback_languages[k] ?? ""}
+                    onChange={(e) =>
+                      setDraft({
+                        ...draft,
+                        feedback_languages: {
+                          ...draft.feedback_languages,
+                          [k]: e.target.value,
+                        },
+                      })
+                    }
+                    className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs"
+                  />
+                </div>
+              ))}
+            </div>
           </div>
         </div>
+      )}
 
-        <div className="space-y-4 xl:col-span-5">
-          <div className="space-y-2.5 rounded-xl border border-slate-200 bg-slate-50/40 p-3">
-            <h3 className="text-xs font-bold uppercase tracking-wide text-slate-600">
-              Mô tả theo Loại bài nói
-            </h3>
-            {Object.entries(TASK_LABELS).map(([k, label]) => (
-              <div key={k}>
-                <label className="block text-xs font-medium text-slate-600">
-                  {label}
-                </label>
-                <input
-                  type="text"
-                  value={draft.task_types[k] ?? ""}
-                  onChange={(e) =>
-                    setDraft({
-                      ...draft,
-                      task_types: { ...draft.task_types, [k]: e.target.value },
-                    })
-                  }
-                  className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs"
-                />
-              </div>
-            ))}
-          </div>
-
-          <div className="space-y-2.5 rounded-xl border border-slate-200 bg-slate-50/40 p-3">
-            <h3 className="text-xs font-bold uppercase tracking-wide text-slate-600">
-              Chỉ dẫn theo Ngôn ngữ nhận xét
-            </h3>
-            {Object.entries(LANG_LABELS).map(([k, label]) => (
-              <div key={k}>
-                <label className="block text-xs font-medium text-slate-600">
-                  {label}
-                </label>
-                <input
-                  type="text"
-                  value={draft.feedback_languages[k] ?? ""}
-                  onChange={(e) =>
-                    setDraft({
-                      ...draft,
-                      feedback_languages: {
-                        ...draft.feedback_languages,
-                        [k]: e.target.value,
-                      },
-                    })
-                  }
-                  className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs"
-                />
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      {/* Live Prompt Preview Drawer */}
-      {previewOpen && (
-        <div className="mt-5 space-y-3 rounded-xl border border-indigo-200 bg-slate-50/70 p-4">
+      {/* Tab 4: Live Prompt Preview */}
+      {editorTab === "preview" && (
+        <div className="mt-4 space-y-3 rounded-xl border border-indigo-200 bg-slate-50/70 p-4">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
               <h3 className="text-sm font-bold text-slate-900">
@@ -793,12 +848,22 @@ export function PromptConfigSection({
           <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-5">
             <div>
               <label className="block text-[11px] font-semibold text-slate-600">
-                Rubric thử
+                Chế độ / Rubric thử
               </label>
               <SelectField
                 value={previewRubricId}
                 onChange={setPreviewRubricId}
-                options={bootstrap.rubrics.map((r) => ({ value: r.id, label: r.name }))}
+                options={[
+                  {
+                    value: "__flexible__",
+                    label: "Linh hoạt theo Đề bài (Không Rubric)",
+                    badge: "Linh hoạt",
+                  },
+                  ...bootstrap.rubrics.map((r) => ({
+                    value: r.id,
+                    label: r.name,
+                  })),
+                ]}
                 size="xs"
                 className="mt-1 w-full"
               />
@@ -847,17 +912,74 @@ export function PromptConfigSection({
             </div>
             <div>
               <label className="block text-[11px] font-semibold text-slate-600">
-                Yêu cầu bổ sung mẫu
+                {previewRubricId === "__flexible__"
+                  ? "Yêu cầu đề bài mẫu"
+                  : "Yêu cầu bổ sung mẫu"}
               </label>
               <input
                 type="text"
                 value={previewExtra}
                 onChange={(e) => setPreviewExtra(e.target.value)}
-                placeholder="VD: Chú trọng ending sounds"
+                placeholder={
+                  previewRubricId === "__flexible__"
+                    ? "VD: Nội dung 4đ, Phát âm 3đ, Từ vựng 3đ"
+                    : "VD: Chú trọng ending sounds"
+                }
                 className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs"
               />
             </div>
           </div>
+
+          {previewRubricId === "__flexible__" && (
+            <div className="flex flex-wrap items-center gap-3 rounded-lg border border-indigo-100 bg-white px-3 py-2 text-xs">
+              <span className="font-semibold text-indigo-700">
+                Thang điểm linh hoạt:
+              </span>
+              <div className="flex items-center gap-1.5">
+                {[10, 20, 100].map((sc) => (
+                  <button
+                    key={sc}
+                    type="button"
+                    onClick={() => setPreviewFlexMaxScore(sc)}
+                    className={`rounded-md border px-2 py-0.5 text-xs font-semibold ${
+                      Math.abs(previewFlexMaxScore - sc) < 1e-6
+                        ? "border-indigo-500 bg-indigo-50 text-indigo-700"
+                        : "border-slate-200 text-slate-600 hover:bg-slate-50"
+                    }`}
+                  >
+                    {sc}
+                  </button>
+                ))}
+                <input
+                  type="number"
+                  min="1"
+                  step="0.5"
+                  value={previewFlexMaxScore}
+                  onChange={(e) => {
+                    const v = Number(e.target.value);
+                    if (Number.isFinite(v) && v > 0) setPreviewFlexMaxScore(v);
+                  }}
+                  aria-label="Thang điểm linh hoạt thử"
+                  className="w-16 rounded-md border border-slate-200 px-2 py-0.5 text-xs font-semibold"
+                />
+              </div>
+              <div className="flex items-center gap-1.5">
+                <span className="text-slate-500">Làm tròn:</span>
+                <SelectField
+                  value={previewFlexRounding}
+                  onChange={setPreviewFlexRounding}
+                  options={[
+                    { value: "0.5", label: "0.5" },
+                    { value: "0.25", label: "0.25" },
+                    { value: "0.1", label: "0.1" },
+                    { value: "1", label: "1" },
+                    { value: "", label: "Không" },
+                  ]}
+                  size="xs"
+                />
+              </div>
+            </div>
+          )}
 
           {previewData && (
             <div className="grid gap-3 lg:grid-cols-2">
@@ -884,7 +1006,7 @@ export function PromptConfigSection({
                     )}
                   </button>
                 </div>
-                <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-slate-700">
+                <pre className="mt-2 max-h-80 overflow-auto whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-slate-700">
                   {previewData.system_instruction || "(Trống)"}
                 </pre>
               </div>
@@ -912,7 +1034,7 @@ export function PromptConfigSection({
                     )}
                   </button>
                 </div>
-                <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-slate-700">
+                <pre className="mt-2 max-h-80 overflow-auto whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-slate-700">
                   {previewData.user_prompt}
                 </pre>
               </div>
