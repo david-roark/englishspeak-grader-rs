@@ -871,8 +871,8 @@ export function MediaToolsPage({
               </div>
             </div>
 
-            {/* Tool selector grid */}
-            <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+            {/* Tool selector segmented pill bar */}
+            <div className="mt-3 flex flex-wrap gap-1.5 rounded-xl border border-slate-200 bg-slate-100 p-1">
               {TOOL_TABS.map((t) => {
                 const Icon = t.icon;
                 const active = activeTool === t.id;
@@ -881,30 +881,20 @@ export function MediaToolsPage({
                     key={t.id}
                     type="button"
                     disabled={taskId !== null}
+                    title={t.shortDesc}
                     onClick={() => handleSelectTool(t.id)}
-                    className={`flex items-start gap-2.5 rounded-xl border p-2.5 text-left transition disabled:opacity-60 ${
+                    className={`inline-flex flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-lg px-3 py-2 text-xs font-semibold transition disabled:opacity-60 ${
                       active
-                        ? "border-indigo-400 bg-indigo-50/70"
-                        : "border-slate-200 hover:bg-slate-50"
+                        ? "bg-white text-indigo-700 shadow-xs"
+                        : "text-slate-600 hover:text-slate-900"
                     }`}
                   >
-                    <div
-                      className={`rounded-lg p-1.5 ${
-                        active
-                          ? "bg-indigo-600 text-white"
-                          : "bg-slate-100 text-slate-600"
+                    <Icon
+                      className={`h-3.5 w-3.5 shrink-0 ${
+                        active ? "text-indigo-600" : "text-slate-400"
                       }`}
-                    >
-                      <Icon className="h-4 w-4" />
-                    </div>
-                    <div className="min-w-0">
-                      <div className="text-xs font-bold text-slate-900">
-                        {t.label}
-                      </div>
-                      <div className="text-[11px] text-slate-500">
-                        {t.shortDesc}
-                      </div>
-                    </div>
+                    />
+                    <span>{t.label}</span>
                   </button>
                 );
               })}

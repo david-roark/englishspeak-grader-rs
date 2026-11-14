@@ -11,6 +11,7 @@ import {
   Minimize2,
   Rocket,
   Save,
+  SlidersHorizontal,
   Sparkles,
   Trash2,
   Upload,
@@ -160,6 +161,7 @@ export function GradePage({
   const [compressOpen, setCompressOpen] = useState(false);
   const [compressPreset, setCompressPreset] = useState("balanced");
   const [compressing, setCompressing] = useState(false);
+  const [configDrawerOpen, setConfigDrawerOpen] = useState(false);
 
   const [gradingMode, setGradingMode] = useState<"flexible" | "rubric">("flexible");
   const [selectedAssignmentId, setSelectedAssignmentId] = useState("");
@@ -562,583 +564,213 @@ export function GradePage({
     }
   }
 
+  const activeAssignmentName =
+    gradingAssignments.find((a) => a.id === selectedAssignmentId)?.name ??
+    "Đề mới / Chấm lẻ";
+  const activeRubricName =
+    rubrics.find((r) => r.id === rubricId)?.name ?? rubricId;
+
   return (
-    <div className="grid items-start gap-4 md:grid-cols-12">
-      {/* Left column: Controls (sticky on desktop so video stays visible while reading results) */}
-      <div className="space-y-3 md:sticky md:top-4 md:col-span-5 xl:col-span-4">
-        <div
-          ref={videoDropRef}
-          className={`rounded-xl border bg-white p-3.5 shadow-xs transition ${
-            isVideoDragging
-              ? "border-indigo-500 ring-2 ring-indigo-500/30"
-              : "border-slate-200"
-          }`}
+    <div className="space-y-3">
+      {/* Compact Assignment Context Bar */}
+      <div className="flex flex-wrap items-center justify-between gap-2.5 rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 shadow-xs">
+        <div className="flex flex-wrap items-center gap-2 text-xs">
+          <span className="font-semibold text-slate-500">Đợt chấm:</span>
+          <SelectField
+            value={selectedAssignmentId}
+            onChange={handleSelectAssignment}
+            disabled={busyTaskId !== null}
+            options={[
+              { value: "", label: "— Soạn đề mới / Chấm lẻ —" },
+              ...gradingAssignments.map((a) => ({
+                value: a.id,
+                label: a.name,
+                badge: `${
+                  a.mode === "flexible"
+                    ? `Linh hoạt · ${formatScoreNum(a.max_score)}đ`
+                    : "Rubric"
+                }${a.images.length > 0 ? ` · ${a.images.length} ảnh` : ""}`,
+              })),
+            ]}
+            size="xs"
+            className="min-w-[200px]"
+            ariaLabel="Chọn nhanh đợt chấm hoặc đề bài đã lưu"
+          />
+          <span className="hidden rounded-full bg-indigo-50 px-2.5 py-0.5 text-[11px] font-semibold text-indigo-700 sm:inline-flex">
+            {gradingMode === "flexible"
+              ? `Linh hoạt · ${formatScoreNum(flexibleMaxScore)}đ`
+              : `Rubric: ${activeRubricName}`}
+          </span>
+          {images.length > 0 && (
+            <span className="rounded-full bg-emerald-50 px-2.5 py-0.5 text-[11px] font-semibold text-emerald-700">
+              {images.length} ảnh đề
+            </span>
+          )}
+          <span className="hidden rounded-full bg-slate-100 px-2.5 py-0.5 text-[11px] font-medium text-slate-600 lg:inline-flex">
+            {TASK_LABELS[taskType] ?? taskType} · {LANG_LABELS[feedbackLang] ?? feedbackLang}
+          </span>
+        </div>
+
+        <button
+          type="button"
+          onClick={() => setConfigDrawerOpen(true)}
+          className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-semibold text-indigo-700 transition hover:bg-indigo-100"
         >
-          <div className="flex items-center justify-between gap-2">
-            <h2 className="text-sm font-bold text-slate-800">
-              1. Video bài nói của học sinh
-            </h2>
-            <button
-              type="button"
-              onClick={handlePickVideo}
-              disabled={busyTaskId !== null}
-              className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-indigo-50 px-2.5 py-1.5 text-xs font-semibold text-indigo-700 hover:bg-indigo-100 disabled:opacity-50"
-            >
-              <Upload className="h-3.5 w-3.5" />
-              Chọn video
-            </button>
-          </div>
-
-          {videoInfo ? (
-            <div className="mt-2.5 space-y-2">
-              <LocalMediaPlayer
-                ref={videoRef}
-                path={videoInfo.path}
-                kind="video"
-                className="aspect-video max-h-[280px] w-full rounded-lg bg-black object-contain"
-              />
-              <div className="flex items-center justify-between gap-2 rounded-lg bg-slate-50 px-3 py-1.5 text-xs text-slate-700">
-                <span className="truncate font-medium" title={videoInfo.path}>
-                  {videoInfo.name}
-                </span>
-                <span className="shrink-0 font-semibold text-indigo-700">
-                  {videoInfo.size_mb.toFixed(2)} MB
-                  {origFileInfo &&
-                    origFileInfo.path !== videoInfo.path &&
-                    origFileInfo.size_mb > 0 && (
-                      <span className="ml-1 text-emerald-600">
-                        (-
-                        {(
-                          (1 - videoInfo.size_mb / origFileInfo.size_mb) *
-                          100
-                        ).toFixed(0)}
-                        %)
-                      </span>
-                    )}
-                </span>
-              </div>
-            </div>
-          ) : (
-            <button
-              type="button"
-              onClick={handlePickVideo}
-              className="mt-2.5 flex w-full flex-col items-center justify-center rounded-xl border-2 border-dashed border-slate-200 bg-slate-50/70 px-4 py-5 text-center hover:border-indigo-300 hover:bg-indigo-50/30"
-            >
-              <FileVideo className="h-7 w-7 text-slate-400" />
-              <span className="mt-1.5 text-sm font-medium text-slate-700">
-                {isVideoDragging
-                  ? "Thả video vào đây ngay..."
-                  : "Kéo thả hoặc bấm để chọn file video (.mp4, .mov, .webm...)"}
-              </span>
-              <span className="mt-0.5 text-xs text-slate-400">
-                Hỗ trợ tối đa 2GB qua Gemini Files API
-              </span>
-            </button>
-          )}
-
-          {/* Accordion nén video */}
-          <div className="mt-2.5 border-t border-slate-100 pt-2.5">
-            <button
-              type="button"
-              onClick={() => setCompressOpen((v) => !v)}
-              className="flex w-full items-center justify-between text-left text-xs font-semibold text-slate-700 hover:text-indigo-700"
-            >
-              <span className="inline-flex items-center gap-1.5">
-                <Minimize2 className="h-3.5 w-3.5" />
-                Nén video trước khi gửi (tiết kiệm dung lượng & TPM)
-              </span>
-              {compressOpen ? (
-                <ChevronDown className="h-4 w-4" />
-              ) : (
-                <ChevronRight className="h-4 w-4" />
-              )}
-            </button>
-
-            {compressOpen && (
-              <div className="mt-2 space-y-2 rounded-lg bg-slate-50 p-2.5">
-                {!ffmpegAvailable && (
-                  <p className="text-xs text-amber-700">
-                    ⚠️ Chưa tìm thấy ffmpeg. Hãy cài ffmpeg hoặc cấu hình trong tab Cài đặt.
-                  </p>
-                )}
-                <SelectField
-                  value={compressPreset}
-                  onChange={setCompressPreset}
-                  options={videoPresets.map((p) => ({
-                    value: p.key,
-                    label: p.label,
-                  }))}
-                  size="xs"
-                  ariaLabel="Preset nén video"
-                />
-                <button
-                  type="button"
-                  onClick={handleCompressInline}
-                  disabled={!videoInfo || compressing || busyTaskId !== null || !ffmpegAvailable}
-                  className="w-full rounded-lg border border-indigo-200 bg-white px-3 py-1.5 text-xs font-semibold text-indigo-700 hover:bg-indigo-50 disabled:opacity-50"
-                >
-                  {compressing ? "Đang nén video..." : "Thực hiện nén từ file gốc"}
-                </button>
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Grading config */}
-        <div className="space-y-3 rounded-xl border border-slate-200 bg-white p-3.5 shadow-xs">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <h2 className="text-sm font-bold text-slate-800">
-              2. Thiết lập chấm bài
-            </h2>
-            <button
-              type="button"
-              onClick={handleOpenSavePanel}
-              disabled={busyTaskId !== null}
-              className="inline-flex items-center gap-1 rounded-lg border border-indigo-200 bg-indigo-50 px-2.5 py-1 text-[11px] font-semibold text-indigo-700 hover:bg-indigo-100 disabled:opacity-50"
-              title="Lưu yêu cầu, thang điểm và ảnh đề thành đợt chấm dùng lại nhiều video"
-            >
-              <BookmarkPlus className="h-3.5 w-3.5" />
-              {selectedAssignmentId ? "Lưu / Cập nhật đề" : "Lưu đợt chấm"}
-            </button>
-          </div>
-
-          {/* Saved Assignment Selector */}
-          <div className="rounded-lg border border-slate-200 bg-slate-50/70 p-2.5">
-            <label className="block text-[11px] font-semibold text-slate-600">
-              Đợt chấm / Đề bài đã lưu
-            </label>
-            <div className="mt-1 flex items-center gap-1.5">
-              <SelectField
-                value={selectedAssignmentId}
-                onChange={handleSelectAssignment}
-                disabled={busyTaskId !== null}
-                options={[
-                  { value: "", label: "— Soạn đề mới / Chấm lẻ —" },
-                  ...gradingAssignments.map((a) => ({
-                    value: a.id,
-                    label: a.name,
-                    badge: `${
-                      a.mode === "flexible"
-                        ? `Linh hoạt · ${formatScoreNum(a.max_score)}đ`
-                        : "Rubric"
-                    }${a.images.length > 0 ? ` · ${a.images.length} ảnh` : ""}`,
-                  })),
-                ]}
-                size="xs"
-                className="min-w-0 flex-1"
-                ariaLabel="Chọn đợt chấm hoặc đề bài đã lưu"
-              />
-              {selectedAssignmentId && (
-                <button
-                  type="button"
-                  onClick={() => void handleDeleteAssignment()}
-                  disabled={busyTaskId !== null}
-                  className="rounded-lg border border-rose-200 bg-white p-1.5 text-rose-600 hover:bg-rose-50 disabled:opacity-50"
-                  title="Xóa đợt chấm đã lưu này"
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                </button>
-              )}
-            </div>
-
-            {savePanelOpen && (
-              <div className="mt-2 space-y-2 rounded-lg border border-indigo-200 bg-white p-2.5">
-                <label className="block text-[11px] font-semibold text-slate-700">
-                  Tên đợt chấm / đề bài
-                </label>
-                <input
-                  type="text"
-                  value={saveNameInput}
-                  onChange={(e) => setSaveNameInput(e.target.value)}
-                  placeholder="VD: Lớp 8A - Speaking Unit 5 Giữa kỳ"
-                  className="w-full rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs focus:border-indigo-400 focus:outline-none"
-                />
-                <div className="flex flex-wrap items-center gap-1.5">
-                  {selectedAssignmentId ? (
-                    <>
-                      <button
-                        type="button"
-                        disabled={savingAssignment}
-                        onClick={() => void handleSaveAssignment(false)}
-                        className="inline-flex items-center gap-1 rounded-lg bg-indigo-600 px-2.5 py-1 text-[11px] font-bold text-white hover:bg-indigo-700 disabled:opacity-50"
-                      >
-                        <Save className="h-3 w-3" />
-                        Cập nhật đề này
-                      </button>
-                      <button
-                        type="button"
-                        disabled={savingAssignment}
-                        onClick={() => void handleSaveAssignment(true)}
-                        className="inline-flex items-center gap-1 rounded-lg border border-indigo-200 bg-indigo-50 px-2.5 py-1 text-[11px] font-semibold text-indigo-700 hover:bg-indigo-100 disabled:opacity-50"
-                      >
-                        Lưu thành đề mới
-                      </button>
-                    </>
-                  ) : (
-                    <button
-                      type="button"
-                      disabled={savingAssignment}
-                      onClick={() => void handleSaveAssignment(true)}
-                      className="inline-flex items-center gap-1 rounded-lg bg-indigo-600 px-2.5 py-1 text-[11px] font-bold text-white hover:bg-indigo-700 disabled:opacity-50"
-                    >
-                      <Save className="h-3 w-3" />
-                      Lưu đợt chấm
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => setSavePanelOpen(false)}
-                    className="rounded-lg border border-slate-200 px-2.5 py-1 text-[11px] font-medium text-slate-600 hover:bg-slate-50"
-                  >
-                    Hủy
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Mode Toggle: Flexible vs Standard Rubric */}
-          <div className="grid grid-cols-2 gap-1 rounded-lg border border-slate-200 bg-slate-100 p-1">
-            <button
-              type="button"
-              onClick={() => setGradingMode("flexible")}
-              disabled={busyTaskId !== null}
-              className={`inline-flex items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-semibold transition ${
-                gradingMode === "flexible"
-                  ? "bg-white text-indigo-700 shadow-xs"
-                  : "text-slate-600 hover:text-slate-900"
-              }`}
-            >
-              <Sparkles className="h-3.5 w-3.5" />
-              Linh hoạt theo Đề bài
-            </button>
-            <button
-              type="button"
-              onClick={() => setGradingMode("rubric")}
-              disabled={busyTaskId !== null}
-              className={`inline-flex items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-semibold transition ${
-                gradingMode === "rubric"
-                  ? "bg-white text-indigo-700 shadow-xs"
-                  : "text-slate-600 hover:text-slate-900"
-              }`}
-            >
-              Theo Rubric chuẩn
-            </button>
-          </div>
-
-          {gradingMode === "flexible" ? (
-            <div className="space-y-2.5">
-              {/* Scale & Rounding */}
-              <div className="grid grid-cols-12 gap-2">
-                <div className="col-span-7">
-                  <label className="block text-[11px] font-semibold text-slate-600">
-                    Thang điểm tổng
-                  </label>
-                  <div className="mt-1 flex items-center gap-1">
-                    {FLEX_SCALE_PRESETS.map((sc) => {
-                      const active = Math.abs(flexibleMaxScore - sc) < 1e-6;
-                      return (
-                        <button
-                          key={sc}
-                          type="button"
-                          onClick={() => setFlexibleMaxScore(sc)}
-                          className={`rounded-md border px-2 py-1 text-xs font-semibold transition ${
-                            active
-                              ? "border-indigo-500 bg-indigo-50 text-indigo-700"
-                              : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
-                          }`}
-                        >
-                          {sc}
-                        </button>
-                      );
-                    })}
-                    <input
-                      type="number"
-                      min="1"
-                      step="0.5"
-                      value={flexibleMaxScore}
-                      onChange={(e) => {
-                        const val = Number(e.target.value);
-                        if (Number.isFinite(val) && val > 0) {
-                          setFlexibleMaxScore(val);
-                        }
-                      }}
-                      aria-label="Thang điểm tối đa tùy chỉnh"
-                      className="min-w-0 flex-1 rounded-md border border-slate-200 px-2 py-1 text-xs font-semibold focus:border-indigo-400 focus:outline-none"
-                    />
-                  </div>
-                </div>
-                <div className="col-span-5">
-                  <label className="block text-[11px] font-semibold text-slate-600">
-                    Làm tròn
-                  </label>
-                  <SelectField
-                    value={flexibleRoundingStep}
-                    onChange={setFlexibleRoundingStep}
-                    options={FLEX_ROUNDING_OPTIONS}
-                    size="xs"
-                    className="mt-1 w-full"
-                    ariaLabel="Bước làm tròn điểm"
-                  />
-                </div>
-              </div>
-
-              {/* Natural language requirements */}
-              <div>
-                <div className="flex items-center justify-between gap-2">
-                  <label className="text-xs font-semibold text-slate-600">
-                    Yêu cầu chấm &amp; Nội dung đề bài
-                  </label>
-                  {extraInstructions.trim() && (
-                    <button
-                      type="button"
-                      onClick={() => setExtraInstructions("")}
-                      className="text-[11px] font-medium text-slate-400 hover:text-rose-600"
-                    >
-                      Xóa chữ
-                    </button>
-                  )}
-                </div>
-                <textarea
-                  rows={4}
-                  value={extraInstructions}
-                  onChange={(e) => setExtraInstructions(e.target.value)}
-                  placeholder="VD: Chấm bài nói Unit 5 theo đề trong ảnh. Trả lời đủ 4 câu hỏi (4đ), phát âm & trôi chảy (3đ), từ vựng & ngữ pháp (3đ). Nói dưới 1 phút trừ 1đ."
-                  className="mt-1 w-full rounded-lg border border-slate-200 px-2.5 py-2 text-xs leading-relaxed focus:border-indigo-400 focus:outline-none"
-                />
-                <div className="mt-1.5 flex flex-wrap gap-1">
-                  {QUICK_REQUIREMENT_CHIPS.map((chip) => (
-                    <button
-                      key={chip.label}
-                      type="button"
-                      onClick={() => appendQuickRequirement(chip.text)}
-                      className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-medium text-slate-600 hover:border-indigo-300 hover:bg-indigo-50 hover:text-indigo-700"
-                    >
-                      {chip.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
-          ) : (
-            <div className="space-y-2.5">
-              <div>
-                <label className="block text-xs font-semibold text-slate-600">
-                  Rubric (tiêu chuẩn chấm)
-                </label>
-                <SelectField
-                  value={rubricId}
-                  onChange={setRubricId}
-                  options={rubrics.map((r) => ({
-                    value: r.id,
-                    label: r.name,
-                    badge: r.is_builtin ? "Mặc định" : "Tùy chỉnh",
-                  }))}
-                  size="sm"
-                  className="mt-1 w-full"
-                  ariaLabel="Rubric tiêu chuẩn chấm"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-semibold text-slate-600">
-                  Yêu cầu bổ sung (tùy chọn)
-                </label>
-                <textarea
-                  rows={2}
-                  value={extraInstructions}
-                  onChange={(e) => setExtraInstructions(e.target.value)}
-                  placeholder="VD: chú trọng phát âm; bỏ qua phần chào hỏi..."
-                  className="mt-1 w-full rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm focus:border-indigo-400 focus:outline-none"
-                />
-              </div>
-            </div>
-          )}
-
-          {/* Multimodal Exam / Prompt Images Dropzone */}
-          <div
-            ref={imageDropRef}
-            className={`rounded-xl border border-dashed p-2.5 transition ${
-              isImageDragging
-                ? "border-indigo-500 bg-indigo-50/40 ring-2 ring-indigo-500/20"
-                : "border-slate-200 bg-slate-50/60"
-            }`}
-          >
-            <div className="flex flex-wrap items-center justify-between gap-1.5">
-              <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-700">
-                <ImagePlus className="h-3.5 w-3.5 text-indigo-600" />
-                Ảnh đề bài / Slide / Tranh ({images.length})
-              </span>
-              <div className="flex items-center gap-1.5">
-                <span className="inline-flex items-center gap-1 rounded bg-white px-1.5 py-0.5 text-[10px] font-medium text-slate-500 ring-1 ring-slate-200">
-                  <ClipboardPaste className="h-2.5 w-2.5" />
-                  Ctrl+V dán
-                </span>
-                <button
-                  type="button"
-                  onClick={() => void handlePickImages()}
-                  disabled={busyTaskId !== null}
-                  className="inline-flex items-center gap-1 rounded-md border border-indigo-200 bg-white px-2 py-0.5 text-[11px] font-semibold text-indigo-700 hover:bg-indigo-50 disabled:opacity-50"
-                >
-                  + Chọn ảnh
-                </button>
-              </div>
-            </div>
-
-            {images.length === 0 ? (
-              <p className="mt-1.5 text-[11px] text-slate-500">
-                {isImageDragging
-                  ? "Thả ảnh đề bài vào đây..."
-                  : "Tùy chọn: chọn file, kéo thả hoặc bấm Ctrl+V để dán ảnh chụp đề bài / tranh cho AI đối chiếu."}
-              </p>
-            ) : (
-              <div className="mt-2 flex flex-wrap gap-2">
-                {images.map((img, idx) => (
-                  <div
-                    key={`${img.name}-${idx}`}
-                    className="group relative h-16 w-16 overflow-hidden rounded-lg border border-slate-200 bg-white shadow-xs"
-                  >
-                    <button
-                      type="button"
-                      onClick={() => setPreviewImage(img)}
-                      className="block h-full w-full"
-                      title={`Xem phóng to: ${img.name}`}
-                    >
-                      <img
-                        src={`data:${img.mime_type};base64,${img.data_base64}`}
-                        alt={img.name}
-                        className="h-full w-full object-cover"
-                      />
-                      <span className="absolute inset-0 flex items-center justify-center bg-black/30 opacity-0 transition group-hover:opacity-100">
-                        <ZoomIn className="h-4 w-4 text-white" />
-                      </span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => removeImage(idx)}
-                      disabled={busyTaskId !== null}
-                      className="absolute right-0.5 top-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-black/75 text-white hover:bg-rose-600"
-                      title="Xóa ảnh này"
-                    >
-                      <X className="h-2.5 w-2.5" />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {promptProfiles.length > 0 && (
-            <div>
-              <label className="block text-xs font-semibold text-slate-600">
-                Cấu hình Prompt
-              </label>
-              <SelectField
-                value={promptProfileId}
-                onChange={setPromptProfileId}
-                options={promptProfiles.map((p) => ({
-                  value: p.id,
-                  label: p.name,
-                  badge:
-                    p.id === activePromptProfileId
-                      ? "Mặc định"
-                      : p.strictness === "strict"
-                      ? "Khắt khe"
-                      : p.strictness === "encouraging"
-                      ? "Khuyến khích"
-                      : "Tiêu chuẩn",
-                }))}
-                size="sm"
-                className="mt-1 w-full"
-                ariaLabel="Chọn cấu hình Prompt"
-              />
-            </div>
-          )}
-
-          <div className="grid grid-cols-2 gap-2.5">
-            <div>
-              <label className="block text-xs font-semibold text-slate-600">
-                Loại bài nói
-              </label>
-              <SelectField
-                value={taskType}
-                onChange={setTaskType}
-                options={Object.entries(TASK_LABELS).map(([k, label]) => ({
-                  value: k,
-                  label,
-                }))}
-                size="sm"
-                className="mt-1 w-full"
-                ariaLabel="Loại bài nói"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-semibold text-slate-600">
-                Ngôn ngữ nhận xét
-              </label>
-              <SelectField
-                value={feedbackLang}
-                onChange={setFeedbackLang}
-                options={Object.entries(LANG_LABELS).map(([k, label]) => ({
-                  value: k,
-                  label,
-                }))}
-                size="sm"
-                className="mt-1 w-full"
-                ariaLabel="Ngôn ngữ nhận xét"
-              />
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-xs font-semibold text-slate-600">
-              Tên học sinh (tùy chọn, cách nhau bằng dấu phẩy)
-            </label>
-            <input
-              type="text"
-              value={studentNames}
-              onChange={(e) => setStudentNames(e.target.value)}
-              placeholder="VD: An, Bình — để trống nếu muốn AI tự lấy tên"
-              className="mt-1 w-full rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm focus:border-indigo-400 focus:outline-none"
-            />
-          </div>
-
-          <div className="rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-2">
-            <div className="flex items-center justify-between gap-2">
-              <span className="text-[11px] font-semibold text-slate-600">
-                Nơi lưu Excel kết quả (tự nhớ)
-              </span>
-              <button
-                type="button"
-                onClick={() => void handleChooseExportDir()}
-                disabled={busyTaskId !== null}
-                className="inline-flex shrink-0 items-center gap-1 rounded-md border border-slate-200 bg-white px-2 py-0.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-100 disabled:opacity-50"
-              >
-                <FolderOpen className="h-3 w-3" />
-                Chọn nơi lưu...
-              </button>
-            </div>
-            <div
-              className="mt-1 truncate text-[11px] text-slate-500"
-              title={exportDir}
-            >
-              <code>{exportDir}</code>
-            </div>
-          </div>
-
-          <button
-            type="button"
-            onClick={handleGrade}
-            disabled={!videoInfo || busyTaskId !== null}
-            className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-bold text-white shadow-xs hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <Rocket className="h-4 w-4" />
-            {busyTaskId && !compressing ? "Đang chấm bài..." : "Chấm điểm bằng AI"}
-          </button>
-        </div>
+          <SlidersHorizontal className="h-3.5 w-3.5" />
+          Chỉnh sửa đề &amp; cấu hình
+        </button>
       </div>
 
-      {/* Right column: Status, Progress, Results */}
-      <div className="space-y-3 md:col-span-7 xl:col-span-8">
+      <div className="grid items-start gap-4 md:grid-cols-12">
+        {/* Left column: Video + Student Name + Primary CTA (always fits above the fold) */}
+        <div className="space-y-3 md:sticky md:top-4 md:col-span-5 xl:col-span-4">
+          <div
+            ref={videoDropRef}
+            className={`rounded-xl border bg-white p-3.5 shadow-xs transition ${
+              isVideoDragging
+                ? "border-indigo-500 ring-2 ring-indigo-500/30"
+                : "border-slate-200"
+            }`}
+          >
+            <div className="flex items-center justify-between gap-2">
+              <h2 className="text-sm font-bold text-slate-800">
+                1. Video bài nói
+              </h2>
+              <button
+                type="button"
+                onClick={handlePickVideo}
+                disabled={busyTaskId !== null}
+                className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-indigo-50 px-2.5 py-1.5 text-xs font-semibold text-indigo-700 hover:bg-indigo-100 disabled:opacity-50"
+              >
+                <Upload className="h-3.5 w-3.5" />
+                Chọn video
+              </button>
+            </div>
+
+            {videoInfo ? (
+              <div className="mt-2.5 space-y-2">
+                <LocalMediaPlayer
+                  ref={videoRef}
+                  path={videoInfo.path}
+                  kind="video"
+                  className="aspect-video max-h-[260px] w-full rounded-lg bg-black object-contain"
+                />
+                <div className="flex items-center justify-between gap-2 rounded-lg bg-slate-50 px-3 py-1.5 text-xs text-slate-700">
+                  <span className="truncate font-medium" title={videoInfo.path}>
+                    {videoInfo.name}
+                  </span>
+                  <span className="shrink-0 font-semibold text-indigo-700">
+                    {videoInfo.size_mb.toFixed(2)} MB
+                    {origFileInfo &&
+                      origFileInfo.path !== videoInfo.path &&
+                      origFileInfo.size_mb > 0 && (
+                        <span className="ml-1 text-emerald-600">
+                          (-
+                          {(
+                            (1 - videoInfo.size_mb / origFileInfo.size_mb) *
+                            100
+                          ).toFixed(0)}
+                          %)
+                        </span>
+                      )}
+                  </span>
+                </div>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={handlePickVideo}
+                className="mt-2.5 flex w-full flex-col items-center justify-center rounded-xl border-2 border-dashed border-slate-200 bg-slate-50/70 px-4 py-6 text-center hover:border-indigo-300 hover:bg-indigo-50/30"
+              >
+                <FileVideo className="h-7 w-7 text-slate-400" />
+                <span className="mt-1.5 text-sm font-medium text-slate-700">
+                  {isVideoDragging
+                    ? "Thả video vào đây ngay..."
+                    : "Kéo thả hoặc bấm để chọn file video (.mp4, .mov, .webm...)"}
+                </span>
+                <span className="mt-0.5 text-xs text-slate-400">
+                  Hỗ trợ tối đa 2GB qua Gemini Files API
+                </span>
+              </button>
+            )}
+
+            {/* Accordion nén video */}
+            <div className="mt-2.5 border-t border-slate-100 pt-2.5">
+              <button
+                type="button"
+                onClick={() => setCompressOpen((v) => !v)}
+                className="flex w-full items-center justify-between text-left text-xs font-semibold text-slate-700 hover:text-indigo-700"
+              >
+                <span className="inline-flex items-center gap-1.5">
+                  <Minimize2 className="h-3.5 w-3.5" />
+                  Nén video trước khi gửi (tiết kiệm TPM)
+                </span>
+                {compressOpen ? (
+                  <ChevronDown className="h-4 w-4" />
+                ) : (
+                  <ChevronRight className="h-4 w-4" />
+                )}
+              </button>
+
+              {compressOpen && (
+                <div className="mt-2 space-y-2 rounded-lg bg-slate-50 p-2.5">
+                  {!ffmpegAvailable && (
+                    <p className="text-xs text-amber-700">
+                      ⚠️ Chưa tìm thấy ffmpeg. Hãy cài ffmpeg hoặc cấu hình trong tab Cài đặt.
+                    </p>
+                  )}
+                  <SelectField
+                    value={compressPreset}
+                    onChange={setCompressPreset}
+                    options={videoPresets.map((p) => ({
+                      value: p.key,
+                      label: p.label,
+                    }))}
+                    size="xs"
+                    ariaLabel="Preset nén video"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleCompressInline}
+                    disabled={!videoInfo || compressing || busyTaskId !== null || !ffmpegAvailable}
+                    className="w-full rounded-lg border border-indigo-200 bg-white px-3 py-1.5 text-xs font-semibold text-indigo-700 hover:bg-indigo-50 disabled:opacity-50"
+                  >
+                    {compressing ? "Đang nén video..." : "Thực hiện nén từ file gốc"}
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Compact Student & Primary Action Card */}
+          <div className="space-y-2.5 rounded-xl border border-slate-200 bg-white p-3.5 shadow-xs">
+            <div>
+              <label className="block text-xs font-semibold text-slate-600">
+                2. Tên học sinh (tùy chọn)
+              </label>
+              <input
+                type="text"
+                value={studentNames}
+                onChange={(e) => setStudentNames(e.target.value)}
+                placeholder="VD: An, Bình — để trống nếu muốn AI tự lấy tên"
+                className="mt-1 w-full rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm focus:border-indigo-400 focus:outline-none"
+              />
+            </div>
+
+            <button
+              type="button"
+              onClick={handleGrade}
+              disabled={!videoInfo || busyTaskId !== null}
+              className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-bold text-white shadow-xs hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <Rocket className="h-4 w-4" />
+              {busyTaskId && !compressing ? "Đang chấm bài..." : "Chấm điểm bằng AI"}
+            </button>
+          </div>
+        </div>
+
+        {/* Right column: Status, Progress, Results */}
+        <div className="space-y-3 md:col-span-7 xl:col-span-8">
         {busyTaskId && (
           <ProgressPanel
             stage={progressStage}
@@ -1200,6 +832,477 @@ export function GradePage({
           </div>
         )}
       </div>
+      </div>
+
+      {/* Slide-over Grading Configuration Drawer */}
+      {configDrawerOpen && (
+        <div
+          className="fixed inset-0 z-40 flex justify-end bg-black/35 backdrop-blur-[1px]"
+          onClick={() => setConfigDrawerOpen(false)}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="Thiết lập đề bài & cấu hình chấm"
+            className="flex h-full w-full max-w-lg flex-col border-l border-slate-200 bg-white shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Drawer Header */}
+            <div className="flex items-center justify-between gap-3 border-b border-slate-100 px-5 py-3.5">
+              <div className="min-w-0">
+                <h2 className="text-sm font-bold text-slate-900">
+                  Thiết lập đề bài &amp; cấu hình chấm
+                </h2>
+                <p className="truncate text-xs text-slate-500">
+                  Đang chọn: {activeAssignmentName}
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleOpenSavePanel}
+                  disabled={busyTaskId !== null}
+                  className="inline-flex items-center gap-1 rounded-lg border border-indigo-200 bg-indigo-50 px-2.5 py-1 text-[11px] font-semibold text-indigo-700 hover:bg-indigo-100 disabled:opacity-50"
+                  title="Lưu yêu cầu, thang điểm và ảnh đề thành đợt chấm dùng lại nhiều video"
+                >
+                  <BookmarkPlus className="h-3.5 w-3.5" />
+                  {selectedAssignmentId ? "Lưu / Cập nhật đề" : "Lưu đợt chấm"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setConfigDrawerOpen(false)}
+                  className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100 hover:text-slate-900"
+                  aria-label="Đóng bảng cấu hình"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
+
+            {/* Drawer Body */}
+            <div className="flex-1 space-y-3.5 overflow-y-auto p-5">
+              {/* Saved Assignment Selector */}
+              <div className="rounded-lg border border-slate-200 bg-slate-50/70 p-2.5">
+                <label className="block text-[11px] font-semibold text-slate-600">
+                  Đợt chấm / Đề bài đã lưu
+                </label>
+                <div className="mt-1 flex items-center gap-1.5">
+                  <SelectField
+                    value={selectedAssignmentId}
+                    onChange={handleSelectAssignment}
+                    disabled={busyTaskId !== null}
+                    options={[
+                      { value: "", label: "— Soạn đề mới / Chấm lẻ —" },
+                      ...gradingAssignments.map((a) => ({
+                        value: a.id,
+                        label: a.name,
+                        badge: `${
+                          a.mode === "flexible"
+                            ? `Linh hoạt · ${formatScoreNum(a.max_score)}đ`
+                            : "Rubric"
+                        }${a.images.length > 0 ? ` · ${a.images.length} ảnh` : ""}`,
+                      })),
+                    ]}
+                    size="xs"
+                    className="min-w-0 flex-1"
+                    ariaLabel="Chọn đợt chấm hoặc đề bài đã lưu"
+                  />
+                  {selectedAssignmentId && (
+                    <button
+                      type="button"
+                      onClick={() => void handleDeleteAssignment()}
+                      disabled={busyTaskId !== null}
+                      className="rounded-lg border border-rose-200 bg-white p-1.5 text-rose-600 hover:bg-rose-50 disabled:opacity-50"
+                      title="Xóa đợt chấm đã lưu này"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+                </div>
+
+                {savePanelOpen && (
+                  <div className="mt-2 space-y-2 rounded-lg border border-indigo-200 bg-white p-2.5">
+                    <label className="block text-[11px] font-semibold text-slate-700">
+                      Tên đợt chấm / đề bài
+                    </label>
+                    <input
+                      type="text"
+                      value={saveNameInput}
+                      onChange={(e) => setSaveNameInput(e.target.value)}
+                      placeholder="VD: Lớp 8A - Speaking Unit 5 Giữa kỳ"
+                      className="w-full rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs focus:border-indigo-400 focus:outline-none"
+                    />
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      {selectedAssignmentId ? (
+                        <>
+                          <button
+                            type="button"
+                            disabled={savingAssignment}
+                            onClick={() => void handleSaveAssignment(false)}
+                            className="inline-flex items-center gap-1 rounded-lg bg-indigo-600 px-2.5 py-1 text-[11px] font-bold text-white hover:bg-indigo-700 disabled:opacity-50"
+                          >
+                            <Save className="h-3 w-3" />
+                            Cập nhật đề này
+                          </button>
+                          <button
+                            type="button"
+                            disabled={savingAssignment}
+                            onClick={() => void handleSaveAssignment(true)}
+                            className="inline-flex items-center gap-1 rounded-lg border border-indigo-200 bg-indigo-50 px-2.5 py-1 text-[11px] font-semibold text-indigo-700 hover:bg-indigo-100 disabled:opacity-50"
+                          >
+                            Lưu thành đề mới
+                          </button>
+                        </>
+                      ) : (
+                        <button
+                          type="button"
+                          disabled={savingAssignment}
+                          onClick={() => void handleSaveAssignment(true)}
+                          className="inline-flex items-center gap-1 rounded-lg bg-indigo-600 px-2.5 py-1 text-[11px] font-bold text-white hover:bg-indigo-700 disabled:opacity-50"
+                        >
+                          <Save className="h-3 w-3" />
+                          Lưu đợt chấm
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => setSavePanelOpen(false)}
+                        className="rounded-lg border border-slate-200 px-2.5 py-1 text-[11px] font-medium text-slate-600 hover:bg-slate-50"
+                      >
+                        Hủy
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Mode Toggle: Flexible vs Standard Rubric */}
+              <div className="grid grid-cols-2 gap-1 rounded-lg border border-slate-200 bg-slate-100 p-1">
+                <button
+                  type="button"
+                  onClick={() => setGradingMode("flexible")}
+                  disabled={busyTaskId !== null}
+                  className={`inline-flex items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-semibold transition ${
+                    gradingMode === "flexible"
+                      ? "bg-white text-indigo-700 shadow-xs"
+                      : "text-slate-600 hover:text-slate-900"
+                  }`}
+                >
+                  <Sparkles className="h-3.5 w-3.5" />
+                  Linh hoạt theo Đề bài
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setGradingMode("rubric")}
+                  disabled={busyTaskId !== null}
+                  className={`inline-flex items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-semibold transition ${
+                    gradingMode === "rubric"
+                      ? "bg-white text-indigo-700 shadow-xs"
+                      : "text-slate-600 hover:text-slate-900"
+                  }`}
+                >
+                  Theo Rubric chuẩn
+                </button>
+              </div>
+
+              {gradingMode === "flexible" ? (
+                <div className="space-y-2.5">
+                  <div className="grid grid-cols-12 gap-2">
+                    <div className="col-span-7">
+                      <label className="block text-[11px] font-semibold text-slate-600">
+                        Thang điểm tổng
+                      </label>
+                      <div className="mt-1 flex items-center gap-1">
+                        {FLEX_SCALE_PRESETS.map((sc) => {
+                          const active = Math.abs(flexibleMaxScore - sc) < 1e-6;
+                          return (
+                            <button
+                              key={sc}
+                              type="button"
+                              onClick={() => setFlexibleMaxScore(sc)}
+                              className={`rounded-md border px-2 py-1 text-xs font-semibold transition ${
+                                active
+                                  ? "border-indigo-500 bg-indigo-50 text-indigo-700"
+                                  : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                              }`}
+                            >
+                              {sc}
+                            </button>
+                          );
+                        })}
+                        <input
+                          type="number"
+                          min="1"
+                          step="0.5"
+                          value={flexibleMaxScore}
+                          onChange={(e) => {
+                            const val = Number(e.target.value);
+                            if (Number.isFinite(val) && val > 0) {
+                              setFlexibleMaxScore(val);
+                            }
+                          }}
+                          aria-label="Thang điểm tối đa tùy chỉnh"
+                          className="min-w-0 flex-1 rounded-md border border-slate-200 px-2 py-1 text-xs font-semibold focus:border-indigo-400 focus:outline-none"
+                        />
+                      </div>
+                    </div>
+                    <div className="col-span-5">
+                      <label className="block text-[11px] font-semibold text-slate-600">
+                        Làm tròn
+                      </label>
+                      <SelectField
+                        value={flexibleRoundingStep}
+                        onChange={setFlexibleRoundingStep}
+                        options={FLEX_ROUNDING_OPTIONS}
+                        size="xs"
+                        className="mt-1 w-full"
+                        ariaLabel="Bước làm tròn điểm"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <div className="flex items-center justify-between gap-2">
+                      <label className="text-xs font-semibold text-slate-600">
+                        Yêu cầu chấm &amp; Nội dung đề bài
+                      </label>
+                      {extraInstructions.trim() && (
+                        <button
+                          type="button"
+                          onClick={() => setExtraInstructions("")}
+                          className="text-[11px] font-medium text-slate-400 hover:text-rose-600"
+                        >
+                          Xóa chữ
+                        </button>
+                      )}
+                    </div>
+                    <textarea
+                      rows={4}
+                      value={extraInstructions}
+                      onChange={(e) => setExtraInstructions(e.target.value)}
+                      placeholder="VD: Chấm bài nói Unit 5 theo đề trong ảnh. Trả lời đủ 4 câu hỏi (4đ), phát âm & trôi chảy (3đ), từ vựng & ngữ pháp (3đ). Nói dưới 1 phút trừ 1đ."
+                      className="mt-1 w-full rounded-lg border border-slate-200 px-2.5 py-2 text-xs leading-relaxed focus:border-indigo-400 focus:outline-none"
+                    />
+                    <div className="mt-1.5 flex flex-wrap gap-1">
+                      {QUICK_REQUIREMENT_CHIPS.map((chip) => (
+                        <button
+                          key={chip.label}
+                          type="button"
+                          onClick={() => appendQuickRequirement(chip.text)}
+                          className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-medium text-slate-600 hover:border-indigo-300 hover:bg-indigo-50 hover:text-indigo-700"
+                        >
+                          {chip.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-2.5">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-600">
+                      Rubric (tiêu chuẩn chấm)
+                    </label>
+                    <SelectField
+                      value={rubricId}
+                      onChange={setRubricId}
+                      options={rubrics.map((r) => ({
+                        value: r.id,
+                        label: r.name,
+                        badge: r.is_builtin ? "Mặc định" : "Tùy chỉnh",
+                      }))}
+                      size="sm"
+                      className="mt-1 w-full"
+                      ariaLabel="Rubric tiêu chuẩn chấm"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-600">
+                      Yêu cầu bổ sung (tùy chọn)
+                    </label>
+                    <textarea
+                      rows={2}
+                      value={extraInstructions}
+                      onChange={(e) => setExtraInstructions(e.target.value)}
+                      placeholder="VD: chú trọng phát âm; bỏ qua phần chào hỏi..."
+                      className="mt-1 w-full rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm focus:border-indigo-400 focus:outline-none"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* Multimodal Exam / Prompt Images Dropzone */}
+              <div
+                ref={imageDropRef}
+                className={`rounded-xl border border-dashed p-2.5 transition ${
+                  isImageDragging
+                    ? "border-indigo-500 bg-indigo-50/40 ring-2 ring-indigo-500/20"
+                    : "border-slate-200 bg-slate-50/60"
+                }`}
+              >
+                <div className="flex flex-wrap items-center justify-between gap-1.5">
+                  <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-700">
+                    <ImagePlus className="h-3.5 w-3.5 text-indigo-600" />
+                    Ảnh đề bài / Slide / Tranh ({images.length})
+                  </span>
+                  <div className="flex items-center gap-1.5">
+                    <span className="inline-flex items-center gap-1 rounded bg-white px-1.5 py-0.5 text-[10px] font-medium text-slate-500 ring-1 ring-slate-200">
+                      <ClipboardPaste className="h-2.5 w-2.5" />
+                      Ctrl+V dán
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => void handlePickImages()}
+                      disabled={busyTaskId !== null}
+                      className="inline-flex items-center gap-1 rounded-md border border-indigo-200 bg-white px-2 py-0.5 text-[11px] font-semibold text-indigo-700 hover:bg-indigo-50 disabled:opacity-50"
+                    >
+                      + Chọn ảnh
+                    </button>
+                  </div>
+                </div>
+
+                {images.length === 0 ? (
+                  <p className="mt-1.5 text-[11px] text-slate-500">
+                    {isImageDragging
+                      ? "Thả ảnh đề bài vào đây..."
+                      : "Tùy chọn: chọn file, kéo thả hoặc bấm Ctrl+V để dán ảnh chụp đề bài / tranh cho AI đối chiếu."}
+                  </p>
+                ) : (
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {images.map((img, idx) => (
+                      <div
+                        key={`${img.name}-${idx}`}
+                        className="group relative h-16 w-16 overflow-hidden rounded-lg border border-slate-200 bg-white shadow-xs"
+                      >
+                        <button
+                          type="button"
+                          onClick={() => setPreviewImage(img)}
+                          className="block h-full w-full"
+                          title={`Xem phóng to: ${img.name}`}
+                        >
+                          <img
+                            src={`data:${img.mime_type};base64,${img.data_base64}`}
+                            alt={img.name}
+                            className="h-full w-full object-cover"
+                          />
+                          <span className="absolute inset-0 flex items-center justify-center bg-black/30 opacity-0 transition group-hover:opacity-100">
+                            <ZoomIn className="h-4 w-4 text-white" />
+                          </span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => removeImage(idx)}
+                          disabled={busyTaskId !== null}
+                          className="absolute right-0.5 top-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-black/75 text-white hover:bg-rose-600"
+                          title="Xóa ảnh này"
+                        >
+                          <X className="h-2.5 w-2.5" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {promptProfiles.length > 0 && (
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600">
+                    Cấu hình Prompt
+                  </label>
+                  <SelectField
+                    value={promptProfileId}
+                    onChange={setPromptProfileId}
+                    options={promptProfiles.map((p) => ({
+                      value: p.id,
+                      label: p.name,
+                      badge:
+                        p.id === activePromptProfileId
+                          ? "Mặc định"
+                          : p.strictness === "strict"
+                          ? "Khắt khe"
+                          : p.strictness === "encouraging"
+                          ? "Khuyến khích"
+                          : "Tiêu chuẩn",
+                    }))}
+                    size="sm"
+                    className="mt-1 w-full"
+                    ariaLabel="Chọn cấu hình Prompt"
+                  />
+                </div>
+              )}
+
+              <div className="grid grid-cols-2 gap-2.5">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600">
+                    Loại bài nói
+                  </label>
+                  <SelectField
+                    value={taskType}
+                    onChange={setTaskType}
+                    options={Object.entries(TASK_LABELS).map(([k, label]) => ({
+                      value: k,
+                      label,
+                    }))}
+                    size="sm"
+                    className="mt-1 w-full"
+                    ariaLabel="Loại bài nói"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600">
+                    Ngôn ngữ nhận xét
+                  </label>
+                  <SelectField
+                    value={feedbackLang}
+                    onChange={setFeedbackLang}
+                    options={Object.entries(LANG_LABELS).map(([k, label]) => ({
+                      value: k,
+                      label,
+                    }))}
+                    size="sm"
+                    className="mt-1 w-full"
+                    ariaLabel="Ngôn ngữ nhận xét"
+                  />
+                </div>
+              </div>
+
+              <div className="rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-2">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[11px] font-semibold text-slate-600">
+                    Nơi lưu Excel kết quả (tự nhớ)
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => void handleChooseExportDir()}
+                    disabled={busyTaskId !== null}
+                    className="inline-flex shrink-0 items-center gap-1 rounded-md border border-slate-200 bg-white px-2 py-0.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-100 disabled:opacity-50"
+                  >
+                    <FolderOpen className="h-3 w-3" />
+                    Chọn nơi lưu...
+                  </button>
+                </div>
+                <div
+                  className="mt-1 truncate text-[11px] text-slate-500"
+                  title={exportDir}
+                >
+                  <code>{exportDir}</code>
+                </div>
+              </div>
+            </div>
+
+            {/* Drawer Footer */}
+            <div className="border-t border-slate-100 px-5 py-3">
+              <button
+                type="button"
+                onClick={() => setConfigDrawerOpen(false)}
+                className="w-full rounded-xl bg-indigo-600 px-4 py-2 text-xs font-bold text-white hover:bg-indigo-700"
+              >
+                Xong · Quay lại chấm bài
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Image Preview Lightbox Modal */}
       {previewImage && (
