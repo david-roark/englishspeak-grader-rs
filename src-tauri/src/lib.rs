@@ -25,16 +25,17 @@ pub fn run() {
     #[cfg(target_os = "linux")]
     configure_linux_media_env();
 
-    let app_state = AppState::initialize().expect("Failed to initialize application state");
-
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
-        .manage(app_state)
         .setup(|app| {
+            let app_local_data_dir = app.path().app_local_data_dir().ok();
+            let app_state =
+                AppState::initialize(app_local_data_dir).map_err(std::io::Error::other)?;
             if let Ok(res_dir) = app.path().resource_dir() {
-                app.state::<AppState>().set_resource_dir(res_dir);
+                app_state.set_resource_dir(res_dir);
             }
+            app.manage(app_state);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

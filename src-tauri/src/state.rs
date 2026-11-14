@@ -20,8 +20,8 @@ pub struct AppState {
 }
 
 impl AppState {
-    pub fn initialize() -> Result<Self, String> {
-        let paths = AppPaths::resolve();
+    pub fn initialize(app_local_data_dir: Option<PathBuf>) -> Result<Self, String> {
+        let paths = AppPaths::resolve_with_app_data_dir(app_local_data_dir);
         paths
             .ensure_dirs()
             .map_err(|e| format!("Không tạo được thư mục dữ liệu: {e}"))?;
