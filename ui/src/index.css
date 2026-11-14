@@ -337,6 +337,63 @@
   [data-theme="dark"] textarea::placeholder {
     color: var(--color-slate-400);
   }
+
+  /* Interactive cursors & tactile hover/active feedback across the app */
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]),
+  [role="combobox"]:not(:disabled),
+  [role="option"]:not([aria-disabled="true"]),
+  a[href],
+  summary,
+  input[type="checkbox"]:not(:disabled),
+  input[type="radio"]:not(:disabled),
+  label:has(input[type="checkbox"]:not(:disabled)),
+  label:has(input[type="radio"]:not(:disabled)) {
+    cursor: pointer;
+  }
+
+  button:disabled,
+  [role="button"][aria-disabled="true"],
+  [role="combobox"]:disabled,
+  [role="option"][aria-disabled="true"],
+  input:disabled,
+  select:disabled,
+  textarea:disabled,
+  label:has(input:disabled) {
+    cursor: not-allowed;
+  }
+
+  button,
+  [role="button"],
+  [role="combobox"] {
+    transition:
+      background-color 150ms ease,
+      border-color 150ms ease,
+      color 150ms ease,
+      box-shadow 150ms ease,
+      transform 120ms ease,
+      opacity 150ms ease;
+  }
+
+  button:not(:disabled):hover,
+  [role="button"]:not([aria-disabled="true"]):hover,
+  [role="combobox"]:not(:disabled):hover {
+    transform: translateY(-0.5px);
+    box-shadow: 0 2px 6px rgba(15, 23, 42, 0.08);
+  }
+
+  [data-theme="dark"] button:not(:disabled):hover,
+  [data-theme="dark"] [role="button"]:not([aria-disabled="true"]):hover,
+  [data-theme="dark"] [role="combobox"]:not(:disabled):hover {
+    box-shadow: 0 2px 8px rgba(2, 6, 23, 0.35);
+  }
+
+  button:not(:disabled):active,
+  [role="button"]:not([aria-disabled="true"]):active,
+  [role="combobox"]:not(:disabled):active {
+    transform: translateY(0) scale(0.985);
+    box-shadow: none;
+  }
 }
 
 /* Keep solid white surfaces decoupled from text-white in dark mode */
