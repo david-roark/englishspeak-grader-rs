@@ -8,7 +8,9 @@ use serde::{Deserialize, Serialize};
 use crate::error::{GraderError, Result};
 use crate::prompts::{default_strictness, default_temperature, merge_with_default, PromptProfile};
 use crate::rubrics::{
-    builtin_rubrics, default_scoring_mode, default_weight, Criterion, CriterionLevel, Rubric,
+    builtin_rubrics, default_assignment_feedback_lang, default_assignment_max_score,
+    default_assignment_mode, default_assignment_task_type, default_scoring_mode, default_weight,
+    AssignmentImage, Criterion, CriterionLevel, GradingAssignment, Rubric,
 };
 use crate::schemas::{AssessmentResult, CriterionScore, Evidence, StudentAssessment};
 
@@ -217,6 +219,22 @@ impl Database {
                 timestamp             TEXT NOT NULL,
                 quote                 TEXT NOT NULL,
                 note                  TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS grading_assignments (
+                id                TEXT PRIMARY KEY,
+                name              TEXT NOT NULL,
+                mode              TEXT NOT NULL DEFAULT 'flexible',
+                rubric_id         TEXT,
+                max_score         REAL NOT NULL DEFAULT 10.0,
+                rounding_step     REAL,
+                requirements      TEXT NOT NULL DEFAULT '',
+                task_type         TEXT NOT NULL DEFAULT 'presentation',
+                feedback_lang     TEXT NOT NULL DEFAULT 'vi',
+                prompt_profile_id TEXT,
+                images_json       TEXT NOT NULL DEFAULT '[]',
+                created_at        TEXT NOT NULL,
+                updated_at        TEXT NOT NULL
             );
 
             CREATE INDEX IF NOT EXISTS idx_assessments_created ON assessments(created_at DESC);
@@ -615,6 +633,156 @@ impl Database {
         let def = PromptProfile::default();
         self.save_prompt_profile(&def)?;
         Ok(def)
+    }
+
+    // --------------------------------------------------------------------- //
+    // Grading Assignments (Đợt chấm / Đề bài lưu sẵn)
+    // --------------------------------------------------------------------- //
+
+    pub fn list_grading_assignments(&self) -> Result<Vec<GradingAssignment>> {
+        let conn = self.connect()?;
+        let mut stmt = conn.prepare(
+            "SELECT id, name, mode, rubric_id, max_score, rounding_step,
+                    requirements, task_type, feedback_lang, prompt_profile_id,
+                    images_json, updated_at
+             FROM grading_assignments
+             ORDER BY updated_at DESC, name ASC",
+        )?;
+        let rows = stmt.query_map([], map_grading_assignment_row)?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        Ok(out)
+    }
+
+    pub fn get_grading_assignment(&self, id: &str) -> Result<Option<GradingAssignment>> {
+        let conn = self.connect()?;
+        conn.query_row(
+            "SELECT id, name, mode, rubric_id, max_score, rounding_step,
+                    requirements, task_type, feedback_lang, prompt_profile_id,
+                    images_json, updated_at
+             FROM grading_assignments WHERE id = ?1",
+            params![id],
+            map_grading_assignment_row,
+        )
+        .optional()
+        .map_err(Into::into)
+    }
+
+    pub fn save_grading_assignment(
+        &self,
+        assignment: &GradingAssignment,
+    ) -> Result<GradingAssignment> {
+        let id = assignment.id.trim();
+        let name = assignment.name.trim();
+        if id.is_empty() || name.is_empty() {
+            return Err(GraderError::InvalidInput(
+                "Cần nhập cả mã (id) và tên đợt chấm / đề bài.".into(),
+            ));
+        }
+        if !assignment.max_score.is_finite() || assignment.max_score <= 0.0 {
+            return Err(GraderError::InvalidInput(
+                "Thang điểm tối đa của đề bài phải lớn hơn 0.".into(),
+            ));
+        }
+
+        let mode = if assignment.mode.trim() == "rubric" {
+            "rubric".to_string()
+        } else {
+            default_assignment_mode()
+        };
+        let rubric_id = assignment
+            .rubric_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(String::from);
+        let rounding_step = assignment
+            .rounding_step
+            .filter(|s| s.is_finite() && *s > 0.0);
+        let task_type = if assignment.task_type.trim().is_empty() {
+            default_assignment_task_type()
+        } else {
+            assignment.task_type.trim().to_string()
+        };
+        let feedback_lang = if assignment.feedback_lang.trim().is_empty() {
+            default_assignment_feedback_lang()
+        } else {
+            assignment.feedback_lang.trim().to_string()
+        };
+        let prompt_profile_id = assignment
+            .prompt_profile_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(String::from);
+        let images: Vec<AssignmentImage> = assignment
+            .images
+            .iter()
+            .filter(|img| !img.data_base64.trim().is_empty() && !img.mime_type.trim().is_empty())
+            .cloned()
+            .collect();
+        let images_json = serde_json::to_string(&images)?;
+        let now = now_iso();
+
+        let saved = GradingAssignment {
+            id: id.to_string(),
+            name: name.to_string(),
+            mode,
+            rubric_id,
+            max_score: assignment.max_score,
+            rounding_step,
+            requirements: assignment.requirements.clone(),
+            task_type,
+            feedback_lang,
+            prompt_profile_id,
+            images,
+            updated_at: now.clone(),
+        };
+
+        let conn = self.connect()?;
+        conn.execute(
+            "INSERT INTO grading_assignments (
+                id, name, mode, rubric_id, max_score, rounding_step,
+                requirements, task_type, feedback_lang, prompt_profile_id,
+                images_json, created_at, updated_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?12)
+             ON CONFLICT(id) DO UPDATE SET
+                name = excluded.name,
+                mode = excluded.mode,
+                rubric_id = excluded.rubric_id,
+                max_score = excluded.max_score,
+                rounding_step = excluded.rounding_step,
+                requirements = excluded.requirements,
+                task_type = excluded.task_type,
+                feedback_lang = excluded.feedback_lang,
+                prompt_profile_id = excluded.prompt_profile_id,
+                images_json = excluded.images_json,
+                updated_at = excluded.updated_at",
+            params![
+                saved.id,
+                saved.name,
+                saved.mode,
+                saved.rubric_id,
+                saved.max_score,
+                saved.rounding_step,
+                saved.requirements,
+                saved.task_type,
+                saved.feedback_lang,
+                saved.prompt_profile_id,
+                images_json,
+                now,
+            ],
+        )?;
+
+        Ok(saved)
+    }
+
+    pub fn delete_grading_assignment(&self, id: &str) -> Result<()> {
+        let conn = self.connect()?;
+        conn.execute("DELETE FROM grading_assignments WHERE id = ?1", params![id])?;
+        Ok(())
     }
 
     // --------------------------------------------------------------------- //
@@ -1066,6 +1234,37 @@ fn ensure_prompt_profile_columns(conn: &Connection) -> Result<()> {
         )?;
     }
     Ok(())
+}
+
+fn map_grading_assignment_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<GradingAssignment> {
+    let images_json: String = row
+        .get::<_, Option<String>>(10)?
+        .unwrap_or_else(|| "[]".to_string());
+    let images: Vec<AssignmentImage> = serde_json::from_str(&images_json).unwrap_or_default();
+    let max_score = row
+        .get::<_, Option<f64>>(4)?
+        .filter(|v| v.is_finite() && *v > 0.0)
+        .unwrap_or_else(default_assignment_max_score);
+    Ok(GradingAssignment {
+        id: row.get(0)?,
+        name: row.get(1)?,
+        mode: row
+            .get::<_, Option<String>>(2)?
+            .unwrap_or_else(default_assignment_mode),
+        rubric_id: row.get(3)?,
+        max_score,
+        rounding_step: row.get(5)?,
+        requirements: row.get::<_, Option<String>>(6)?.unwrap_or_default(),
+        task_type: row
+            .get::<_, Option<String>>(7)?
+            .unwrap_or_else(default_assignment_task_type),
+        feedback_lang: row
+            .get::<_, Option<String>>(8)?
+            .unwrap_or_else(default_assignment_feedback_lang),
+        prompt_profile_id: row.get(9)?,
+        images,
+        updated_at: row.get::<_, Option<String>>(11)?.unwrap_or_default(),
+    })
 }
 
 fn map_prompt_profile_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<PromptProfile> {

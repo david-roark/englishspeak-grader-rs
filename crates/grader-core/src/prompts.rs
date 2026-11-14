@@ -152,6 +152,27 @@ pub fn build_prompt_parts(
     student_names: Option<&[String]>,
     extra_instructions: &str,
 ) -> PromptParts {
+    build_prompt_parts_with_images(
+        profile,
+        rubric,
+        task_type,
+        feedback_language,
+        student_names,
+        extra_instructions,
+        0,
+    )
+}
+
+/// Tách prompt thành `systemInstruction` và `user_prompt`, có hỗ trợ thông tin ảnh đề bài đính kèm.
+pub fn build_prompt_parts_with_images(
+    profile: &PromptProfile,
+    rubric: &Rubric,
+    task_type: &str,
+    feedback_language: &str,
+    student_names: Option<&[String]>,
+    extra_instructions: &str,
+    image_count: usize,
+) -> PromptParts {
     let task_desc = profile
         .task_types
         .get(task_type)
@@ -173,6 +194,8 @@ pub fn build_prompt_parts(
         _ => profile.names_auto_detect.clone(),
     };
 
+    let is_flexible = rubric.is_flexible();
+
     let mut parts: Vec<String> = Vec::new();
     parts.push(format!("LOẠI BÀI: {task_desc}"));
     parts.push(format!(
@@ -181,6 +204,21 @@ pub fn build_prompt_parts(
     ));
     parts.push(String::new());
     parts.push(rubric.to_prompt_block());
+
+    if image_count > 0 {
+        parts.push(String::new());
+        parts.push(format!(
+            "ẢNH ĐỀ BÀI / TÀI LIỆU ĐÍNH KÈM ({image_count} ảnh):"
+        ));
+        parts.push(format!(
+            "- Giáo viên có đính kèm {image_count} hình ảnh đề bài / câu hỏi gợi ý / tranh tình huống."
+        ));
+        parts.push(
+            "- Hãy quan sát kỹ nội dung chữ và hình trong các ảnh đề bài này để đối chiếu trực tiếp với phần trình bày của học sinh trong video (đúng chủ đề, trả lời đủ câu hỏi/ý gợi ý, mô tả đúng tranh, dùng đúng từ vựng/cấu trúc yêu cầu)."
+                .to_string(),
+        );
+    }
+
     parts.push(String::new());
     parts.push("PHÂN BIỆT HỌC SINH:".to_string());
     parts.push(names_line);
@@ -189,7 +227,14 @@ pub fn build_prompt_parts(
 
     let mut has_lang_instr = false;
     for rule in &profile.grading_rules {
-        let mut line = rule.clone();
+        let mut line = if is_flexible && rule.contains("không tự thêm/bớt tiêu chí") {
+            "Chấm điểm bám sát yêu cầu đề bài; tách các đầu mục vào `criteria` theo đúng đề bài hoặc chia 3–4 tiêu chí hợp lý.".to_string()
+        } else if is_flexible && rule.contains("GIỮ NGUYÊN như trong rubric") {
+            "Đặt tên các tiêu chí trong kết quả rõ ràng, khớp với các đầu mục yêu cầu của đề bài.".to_string()
+        } else {
+            rule.clone()
+        };
+
         if line.contains("{lang_instr}") {
             line = line.replace("{lang_instr}", lang_instr);
             has_lang_instr = true;

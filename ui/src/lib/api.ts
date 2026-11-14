@@ -6,8 +6,10 @@ import type {
   AppBootstrap,
   AssessmentDetail,
   AssessmentSummary,
+  AssignmentImage,
   FileInfo,
   GradeResponse,
+  GradingAssignment,
   MediaOutput,
   ProgressPayload,
   PromptParts,
@@ -65,6 +67,11 @@ export const api = {
     extra_instructions: string;
     media_resolution: string;
     prompt_profile_id?: string;
+    grading_mode?: "flexible" | "rubric";
+    assignment_name?: string;
+    flexible_max_score?: number;
+    flexible_rounding_step?: number | null;
+    images?: AssignmentImage[];
   }) => invoke<GradeResponse>("grade_video_cmd", { req }),
 
   compressVideo: (params: {
@@ -139,6 +146,15 @@ export const api = {
     invoke<Rubric[]>("clone_rubric", { sourceId, newId, newName }),
   deleteCustomRubric: (id: string) =>
     invoke<Rubric[]>("delete_custom_rubric", { id }),
+
+  listGradingAssignments: () =>
+    invoke<GradingAssignment[]>("list_grading_assignments"),
+  saveGradingAssignment: (assignment: GradingAssignment) =>
+    invoke<GradingAssignment[]>("save_grading_assignment", { assignment }),
+  deleteGradingAssignment: (id: string) =>
+    invoke<GradingAssignment[]>("delete_grading_assignment", { id }),
+  loadImageFile: (path: string) =>
+    invoke<AssignmentImage>("load_image_file", { path }),
 
   listAssessments: (query?: string, limit = 100) =>
     invoke<AssessmentSummary[]>("list_assessments", {
@@ -253,6 +269,31 @@ export const api = {
       ],
     });
     return typeof selected === "string" ? selected : null;
+  },
+
+  pickImageFiles: async (): Promise<string[]> => {
+    const selected = await open({
+      multiple: true,
+      title: "Chọn ảnh đề bài / slide / tranh tình huống",
+      filters: [
+        {
+          name: "Hình ảnh",
+          extensions: [
+            "png",
+            "jpg",
+            "jpeg",
+            "webp",
+            "gif",
+            "bmp",
+            "heic",
+            "heif",
+          ],
+        },
+      ],
+    });
+    if (Array.isArray(selected)) return selected;
+    if (typeof selected === "string") return [selected];
+    return [];
   },
 
   pickMediaFile: async (): Promise<string | null> => {

@@ -1,8 +1,12 @@
+use std::path::Path;
 use std::sync::LazyLock;
 
 use serde::{Deserialize, Serialize};
 
+use crate::error::{GraderError, Result};
 use crate::schemas::{AssessmentResult, CriterionScore};
+
+pub const MAX_ASSIGNMENT_IMAGE_BYTES: u64 = 15 * 1024 * 1024;
 
 pub fn default_weight() -> f64 {
     1.0
@@ -10,6 +14,143 @@ pub fn default_weight() -> f64 {
 
 pub fn default_scoring_mode() -> String {
     "sum".to_string()
+}
+
+pub fn default_assignment_mode() -> String {
+    "flexible".to_string()
+}
+
+pub fn default_assignment_max_score() -> f64 {
+    10.0
+}
+
+pub fn default_assignment_rounding() -> Option<f64> {
+    Some(0.5)
+}
+
+pub fn default_assignment_task_type() -> String {
+    "presentation".to_string()
+}
+
+pub fn default_assignment_feedback_lang() -> String {
+    "vi".to_string()
+}
+
+/// Mã hóa dữ liệu nhị phân sang chuỗi Base64 chuẩn RFC 4648.
+pub fn encode_base64(bytes: &[u8]) -> String {
+    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
+        let b0 = chunk[0] as usize;
+        let b1 = if chunk.len() > 1 { chunk[1] as usize } else { 0 };
+        let b2 = if chunk.len() > 2 { chunk[2] as usize } else { 0 };
+        let triple = (b0 << 16) | (b1 << 8) | b2;
+
+        out.push(TABLE[(triple >> 18) & 0x3f] as char);
+        out.push(TABLE[(triple >> 12) & 0x3f] as char);
+        out.push(if chunk.len() > 1 {
+            TABLE[(triple >> 6) & 0x3f] as char
+        } else {
+            '='
+        });
+        out.push(if chunk.len() > 2 {
+            TABLE[triple & 0x3f] as char
+        } else {
+            '='
+        });
+    }
+    out
+}
+
+/// Xác định MIME type từ phần mở rộng của file ảnh đề bài.
+pub fn detect_image_mime(path: &Path) -> Option<&'static str> {
+    match path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_lowercase())
+        .as_deref()
+    {
+        Some("png") => Some("image/png"),
+        Some("jpg") | Some("jpeg") => Some("image/jpeg"),
+        Some("webp") => Some("image/webp"),
+        Some("gif") => Some("image/gif"),
+        Some("bmp") => Some("image/bmp"),
+        Some("heic") => Some("image/heic"),
+        Some("heif") => Some("image/heif"),
+        _ => None,
+    }
+}
+
+/// Hình ảnh đề bài / slide / tranh tình huống đính kèm khi chấm bài.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AssignmentImage {
+    pub name: String,
+    pub mime_type: String,
+    pub data_base64: String,
+}
+
+impl AssignmentImage {
+    /// Đọc file ảnh từ đĩa, kiểm tra định dạng và giới hạn <= 15 MB rồi mã hóa Base64.
+    pub fn from_file(path: &Path) -> Result<Self> {
+        if !path.is_file() {
+            return Err(GraderError::InvalidInput(format!(
+                "Không tìm thấy file ảnh: {}",
+                path.display()
+            )));
+        }
+        let mime_type = detect_image_mime(path).ok_or_else(|| {
+            GraderError::InvalidInput(format!(
+                "Định dạng ảnh chưa được hỗ trợ (hỗ trợ PNG, JPG, WEBP, GIF, BMP, HEIC): {}",
+                path.display()
+            ))
+        })?;
+        let meta = std::fs::metadata(path)?;
+        if meta.len() > MAX_ASSIGNMENT_IMAGE_BYTES {
+            return Err(GraderError::InvalidInput(format!(
+                "Ảnh '{}' quá lớn ({:.1} MB). Giới hạn tối đa mỗi ảnh là 15 MB.",
+                path.display(),
+                meta.len() as f64 / (1024.0 * 1024.0)
+            )));
+        }
+        let bytes = std::fs::read(path)?;
+        let name = path
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("de_bai.png")
+            .to_string();
+        Ok(Self {
+            name,
+            mime_type: mime_type.to_string(),
+            data_base64: encode_base64(&bytes),
+        })
+    }
+}
+
+/// Một Đề bài / Đợt chấm lưu sẵn để giáo viên tái sử dụng cho nhiều video.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct GradingAssignment {
+    pub id: String,
+    pub name: String,
+    #[serde(default = "default_assignment_mode")]
+    pub mode: String, // "flexible" | "rubric"
+    #[serde(default)]
+    pub rubric_id: Option<String>,
+    #[serde(default = "default_assignment_max_score")]
+    pub max_score: f64,
+    #[serde(default = "default_assignment_rounding")]
+    pub rounding_step: Option<f64>,
+    #[serde(default)]
+    pub requirements: String,
+    #[serde(default = "default_assignment_task_type")]
+    pub task_type: String,
+    #[serde(default = "default_assignment_feedback_lang")]
+    pub feedback_lang: String,
+    #[serde(default)]
+    pub prompt_profile_id: Option<String>,
+    #[serde(default)]
+    pub images: Vec<AssignmentImage>,
+    #[serde(default)]
+    pub updated_at: String,
 }
 
 /// Mô tả một mức đạt cụ thể trong một tiêu chí (Band / Level Descriptor).
@@ -102,6 +243,45 @@ pub fn round_to_step(val: f64, step: Option<f64>) -> f64 {
 }
 
 impl Rubric {
+    /// Tạo Rubric linh hoạt (ephemeral) từ mô tả yêu cầu tự nhiên & thang điểm của giáo viên.
+    pub fn flexible(
+        name: impl Into<String>,
+        requirements: impl Into<String>,
+        max_score: f64,
+        rounding_step: Option<f64>,
+    ) -> Self {
+        let name_str = name.into();
+        let clean_name = if name_str.trim().is_empty() {
+            "Chấm linh hoạt theo Đề bài".to_string()
+        } else {
+            name_str.trim().to_string()
+        };
+        let valid_max = if max_score.is_finite() && max_score > 0.0 {
+            max_score
+        } else {
+            10.0
+        };
+        let valid_round = rounding_step.filter(|s| s.is_finite() && *s > 0.0);
+        Self {
+            id: "flexible_assignment".to_string(),
+            name: clean_name,
+            description: requirements.into(),
+            scale_note: format!(
+                "Chấm linh hoạt theo yêu cầu đề bài, thang điểm tối đa {}",
+                fmt_num(valid_max)
+            ),
+            is_builtin: false,
+            scoring_mode: "flexible".to_string(),
+            target_scale: Some(valid_max),
+            rounding_step: valid_round,
+            criteria: Vec::new(),
+        }
+    }
+
+    pub fn is_flexible(&self) -> bool {
+        self.scoring_mode == "flexible" || self.criteria.is_empty()
+    }
+
     pub fn is_weighted_avg(&self) -> bool {
         self.scoring_mode == "weighted_avg"
     }
@@ -126,6 +306,14 @@ impl Rubric {
     }
 
     pub fn max_total(&self) -> f64 {
+        if self.is_flexible() {
+            let scale = self
+                .target_scale
+                .filter(|s| s.is_finite() && *s > 0.0)
+                .unwrap_or(10.0);
+            return round_to_step(scale, self.rounding_step);
+        }
+
         if self.is_weighted_avg() {
             if let Some(scale) = self.target_scale.filter(|s| s.is_finite() && *s > 0.0) {
                 return round_to_step(scale, self.rounding_step);
@@ -165,6 +353,34 @@ impl Rubric {
         let max_total = self.max_total();
         if scores.is_empty() {
             return (0.0, max_total);
+        }
+
+        if self.is_flexible() {
+            let mut sum_score = 0.0;
+            let mut sum_max = 0.0;
+            for s in scores {
+                let max_s = if s.max_score.is_finite() && s.max_score >= 0.0 {
+                    s.max_score
+                } else {
+                    0.0
+                };
+                let sc = if s.score.is_finite() {
+                    s.score.clamp(0.0, max_s)
+                } else {
+                    0.0
+                };
+                sum_score += sc;
+                sum_max += max_s;
+            }
+            let raw = if (sum_max - max_total).abs() <= 1e-6 {
+                sum_score
+            } else if sum_max > 1e-6 {
+                (sum_score / sum_max) * max_total
+            } else {
+                0.0
+            };
+            let rounded = round_to_step(raw, self.rounding_step).clamp(0.0, max_total);
+            return (rounded, max_total);
         }
 
         if self.is_weighted_avg() {
@@ -220,6 +436,41 @@ impl Rubric {
 
     /// Hậu kiểm kết quả Gemini: kẹp điểm tiêu chí trong [min, max] và tính lại `total_score`/`max_total_score`.
     pub fn normalize_assessment_result(&self, result: &mut AssessmentResult) {
+        if self.is_flexible() {
+            let max_total = self.max_total();
+            for student in &mut result.students {
+                for s in &mut student.criteria {
+                    let max_s = if s.max_score.is_finite() && s.max_score >= 0.0 {
+                        round_to_step(s.max_score, None)
+                    } else {
+                        0.0
+                    };
+                    let sc = if s.score.is_finite() {
+                        round_to_step(s.score.clamp(0.0, max_s), None)
+                    } else {
+                        0.0
+                    };
+                    s.max_score = max_s;
+                    s.score = sc;
+                }
+                if !student.criteria.is_empty() {
+                    let (total, mt) = self.compute_total_score(&student.criteria);
+                    student.total_score = total;
+                    student.max_total_score = mt;
+                } else {
+                    let raw = if student.total_score.is_finite() {
+                        student.total_score
+                    } else {
+                        0.0
+                    };
+                    student.total_score =
+                        round_to_step(raw, self.rounding_step).clamp(0.0, max_total);
+                    student.max_total_score = max_total;
+                }
+            }
+            return;
+        }
+
         for student in &mut result.students {
             for (idx, s) in student.criteria.iter_mut().enumerate() {
                 if let Some(c) = self.match_criterion(idx, &s.criterion) {
@@ -242,7 +493,13 @@ impl Rubric {
             Some(s) if s > 0.0 => format!(", làm tròn bước {}", fmt_num(s)),
             _ => String::new(),
         };
-        if self.is_weighted_avg() {
+        if self.is_flexible() {
+            format!(
+                "Chấm linh hoạt theo đề bài trên thang {}{}",
+                fmt_num(self.max_total()),
+                round_part
+            )
+        } else if self.is_weighted_avg() {
             format!(
                 "Trung bình có trọng số quy về thang {}{}",
                 fmt_num(self.max_total()),
@@ -259,6 +516,26 @@ impl Rubric {
 
     /// Chuyển rubric thành đoạn text mô tả để nhúng vào prompt gửi Gemini.
     pub fn to_prompt_block(&self) -> String {
+        if self.is_flexible() {
+            let max_tot = fmt_num(self.max_total());
+            let mut lines = vec![
+                format!("CHẾ ĐỘ CHẤM LINH HOẠT THEO ĐỀ BÀI: {}", self.name),
+                format!(
+                    "Thang điểm tổng tối đa: {max_tot} điểm ({})",
+                    self.scoring_formula_summary()
+                ),
+            ];
+            if !self.description.trim().is_empty() {
+                lines.push("YÊU CẦU & NỘI DUNG ĐỀ BÀI CỦA GIÁO VIÊN:".to_string());
+                lines.push(self.description.trim().to_string());
+            }
+            lines.push("HƯỚNG DẪN TÁCH TIÊU CHÍ & CHẤM ĐIỂM:".to_string());
+            lines.push("- Nếu giáo viên đã nêu rõ các đầu mục chấm và thang điểm thành phần trong yêu cầu (hoặc trong ảnh đề), hãy tách ĐÚNG các đầu mục đó vào mảng `criteria` với `max_score` tương ứng.".to_string());
+            lines.push(format!("- Nếu giáo viên chỉ nêu yêu cầu tổng quát mà chưa chia nhỏ điểm, hãy tự chia thành 3–4 tiêu chí đánh giá hợp lý bám sát đúng yêu cầu đề bài (ví dụ: Đáp ứng nội dung đề bài, Phát âm & Độ trôi chảy, Từ vựng & Ngữ pháp...) sao cho tổng `max_score` của các tiêu chí bằng đúng {max_tot}."));
+            lines.push(format!("- Đảm bảo tổng điểm các tiêu chí (`total_score`) khớp với quy tắc làm tròn và không vượt quá {max_tot}."));
+            return lines.join("\n");
+        }
+
         let mut lines = vec![format!("RUBRIC: {}", self.name)];
         if !self.description.trim().is_empty() {
             lines.push(self.description.clone());

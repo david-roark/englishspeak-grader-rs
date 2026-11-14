@@ -14,8 +14,8 @@ use tokio_util::io::ReaderStream;
 use tokio_util::sync::CancellationToken;
 
 use crate::error::{GraderError, Result};
-use crate::prompts::{build_prompt_parts, PromptProfile};
-use crate::rubrics::Rubric;
+use crate::prompts::{build_prompt_parts_with_images, PromptProfile};
+use crate::rubrics::{AssignmentImage, Rubric};
 use crate::schemas::{assessment_result_gemini_schema, AssessmentResult};
 
 pub const DEFAULT_BASE_URL: &str = "https://generativelanguage.googleapis.com";
@@ -578,15 +578,53 @@ impl GeminiClient {
         media_resolution: MediaResolution,
         cancel: Option<&CancellationToken>,
     ) -> Result<AssessmentResult> {
+        self.grade_video_with_images(
+            uploaded,
+            rubric,
+            prompt_profile,
+            model,
+            task_type,
+            feedback_language,
+            student_names,
+            extra_instructions,
+            &[],
+            media_resolution,
+            cancel,
+        )
+        .await
+    }
+
+    /// Gửi video + ảnh đề bài (inlineData) + prompt + JSON Schema cho Gemini để chấm điểm.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn grade_video_with_images(
+        &self,
+        uploaded: &UploadedFile,
+        rubric: &Rubric,
+        prompt_profile: &PromptProfile,
+        model: &str,
+        task_type: &str,
+        feedback_language: &str,
+        student_names: Option<&[String]>,
+        extra_instructions: &str,
+        images: &[AssignmentImage],
+        media_resolution: MediaResolution,
+        cancel: Option<&CancellationToken>,
+    ) -> Result<AssessmentResult> {
         check_cancelled(cancel)?;
 
-        let prompt_parts = build_prompt_parts(
+        let valid_images: Vec<&AssignmentImage> = images
+            .iter()
+            .filter(|img| !img.data_base64.trim().is_empty() && !img.mime_type.trim().is_empty())
+            .collect();
+
+        let prompt_parts = build_prompt_parts_with_images(
             prompt_profile,
             rubric,
             task_type,
             feedback_language,
             student_names,
             extra_instructions,
+            valid_images.len(),
         );
 
         let model_id = model.strip_prefix("models/").unwrap_or(model);
@@ -601,18 +639,26 @@ impl GeminiClient {
             0.25
         };
 
+        let mut content_parts = vec![json!({
+            "fileData": {
+                "fileUri": uploaded.uri,
+                "mimeType": uploaded.mime_type
+            }
+        })];
+        for img in valid_images {
+            content_parts.push(json!({
+                "inlineData": {
+                    "mimeType": img.mime_type,
+                    "data": img.data_base64
+                }
+            }));
+        }
+        content_parts.push(json!({ "text": prompt_parts.user_prompt }));
+
         let mut body = json!({
             "contents": [{
                 "role": "user",
-                "parts": [
-                    {
-                        "fileData": {
-                            "fileUri": uploaded.uri,
-                            "mimeType": uploaded.mime_type
-                        }
-                    },
-                    { "text": prompt_parts.user_prompt }
-                ]
+                "parts": content_parts
             }],
             "generationConfig": {
                 "temperature": temperature,

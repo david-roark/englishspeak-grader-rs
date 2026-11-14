@@ -279,6 +279,7 @@ export function App() {
             model={selectedModel}
             mediaResolution={mediaRes}
             rubrics={bootstrap.rubrics}
+            gradingAssignments={bootstrap.grading_assignments}
             promptProfiles={bootstrap.prompt_profiles}
             activePromptProfileId={bootstrap.active_prompt_profile_id}
             videoPresets={bootstrap.video_presets}
@@ -286,6 +287,11 @@ export function App() {
             exportDir={bootstrap.export_dir}
             hasCustomExportDir={bootstrap.has_custom_export_dir}
             onBootstrapUpdated={(next) => setBootstrap(next)}
+            onAssignmentsChanged={(grading_assignments) =>
+              setBootstrap((prev) =>
+                prev ? { ...prev, grading_assignments } : prev
+              )
+            }
           />
         )}
 

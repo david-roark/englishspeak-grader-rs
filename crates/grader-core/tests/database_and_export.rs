@@ -2,7 +2,7 @@ use calamine::{open_workbook, Data, Reader, Xlsx};
 use grader_core::database::{Database, NewAssessment};
 use grader_core::export::{default_export_path, export_to_excel, safe_sheet_title, slug};
 use grader_core::prompts::PromptProfile;
-use grader_core::rubrics::{Criterion, CriterionLevel, Rubric};
+use grader_core::rubrics::{AssignmentImage, Criterion, CriterionLevel, GradingAssignment, Rubric};
 use grader_core::schemas::{AssessmentResult, CriterionScore, Evidence, StudentAssessment};
 use tempfile::TempDir;
 
@@ -269,4 +269,71 @@ fn test_export_to_excel_structure_and_sheet_helpers() {
 
     let auto = default_export_path(dir.path(), "my video.mp4");
     assert_eq!(auto.extension().and_then(|s| s.to_str()), Some("xlsx"));
+}
+
+#[test]
+fn test_grading_assignment_crud_with_images() {
+    let dir = TempDir::new().unwrap();
+    let db = Database::new(dir.path().join("grader.db"));
+    db.init().unwrap();
+
+    assert!(db.list_grading_assignments().unwrap().is_empty());
+
+    let assignment = GradingAssignment {
+        id: "lop8a_unit5".into(),
+        name: "Lớp 8A - Speaking Unit 5".into(),
+        mode: "flexible".into(),
+        rubric_id: None,
+        max_score: 20.0,
+        rounding_step: Some(0.25),
+        requirements: "Trả lời đủ 3 câu hỏi trên slide.".into(),
+        task_type: "presentation".into(),
+        feedback_lang: "vi".into(),
+        prompt_profile_id: Some("default".into()),
+        images: vec![AssignmentImage {
+            name: "slide1.png".into(),
+            mime_type: "image/png".into(),
+            data_base64: "ZmFrZV9wbmc=".into(),
+        }],
+        updated_at: String::new(),
+    };
+
+    let saved = db.save_grading_assignment(&assignment).unwrap();
+    assert!(!saved.updated_at.is_empty());
+    assert_eq!(saved.images.len(), 1);
+
+    let list = db.list_grading_assignments().unwrap();
+    assert_eq!(list.len(), 1);
+    assert_eq!(list[0].name, "Lớp 8A - Speaking Unit 5");
+    assert_eq!(list[0].max_score, 20.0);
+    assert_eq!(list[0].rounding_step, Some(0.25));
+
+    // Update existing assignment
+    let mut updated_input = saved.clone();
+    updated_input.requirements = "Cập nhật yêu cầu mới".into();
+    updated_input.images.push(AssignmentImage {
+        name: "slide2.jpg".into(),
+        mime_type: "image/jpeg".into(),
+        data_base64: "ZmFrZV9qcGc=".into(),
+    });
+    db.save_grading_assignment(&updated_input).unwrap();
+
+    let reloaded = db.get_grading_assignment("lop8a_unit5").unwrap().unwrap();
+    assert_eq!(reloaded.requirements, "Cập nhật yêu cầu mới");
+    assert_eq!(reloaded.images.len(), 2);
+
+    // Validation guards
+    let mut bad = updated_input.clone();
+    bad.name = "   ".into();
+    assert!(db.save_grading_assignment(&bad).is_err());
+    bad.name = "Valid".into();
+    bad.max_score = 0.0;
+    assert!(db.save_grading_assignment(&bad).is_err());
+
+    // Delete
+    db.delete_grading_assignment("lop8a_unit5").unwrap();
+    assert!(db
+        .get_grading_assignment("lop8a_unit5")
+        .unwrap()
+        .is_none());
 }

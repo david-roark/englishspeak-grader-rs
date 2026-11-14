@@ -11,7 +11,7 @@ use grader_core::media::{
     resolve_ffmpeg, DEFAULT_MP3_PRESET, DEFAULT_VIDEO_PRESET,
 };
 use grader_core::prompts::PromptProfile;
-use grader_core::rubrics::get_builtin_rubric;
+use grader_core::rubrics::{get_builtin_rubric, AssignmentImage, Rubric};
 use grader_core::schemas::{AssessmentResult, CriterionScore, StudentAssessment};
 use serde_json::json;
 use tempfile::TempDir;
@@ -424,4 +424,97 @@ fn test_trim_and_mute_args_builders() {
     assert!(mute_args.contains(&"-an".to_string()));
     assert!(mute_args.windows(2).any(|w| w == ["-c:v", "copy"]));
     assert!(mute_args.contains(&"+faststart".to_string()));
+}
+
+#[tokio::test]
+async fn test_grade_video_with_images_sends_inline_data_and_normalizes_flexible() {
+    let server = MockServer::start().await;
+    let valid = AssessmentResult {
+        task_summary: "Describe picture".into(),
+        detected_language: "English".into(),
+        general_notes: String::new(),
+        students: vec![StudentAssessment {
+            student_name: "Minh".into(),
+            name_confident: true,
+            criteria: vec![
+                CriterionScore {
+                    criterion: "Mô tả tranh".into(),
+                    score: 3.5,
+                    max_score: 4.0,
+                    comment: "Đúng ý".into(),
+                },
+                CriterionScore {
+                    criterion: "Phát âm & Trôi chảy".into(),
+                    score: 4.3,
+                    max_score: 6.0,
+                    comment: "Khá".into(),
+                },
+            ],
+            total_score: 7.8,
+            max_total_score: 10.0,
+            overall_level: "Khá giỏi".into(),
+            strengths: vec!["Rõ ràng".into()],
+            weaknesses: vec![],
+            improvement_suggestions: vec![],
+            practice_directions: vec![],
+            evidence: vec![],
+        }],
+    };
+    let json_text = serde_json::to_string(&valid).unwrap();
+
+    Mock::given(method("POST"))
+        .and(path(
+            "/v1beta/models/gemini-flash-lite-latest:generateContent",
+        ))
+        .and(query_param("key", "test-key"))
+        .and(wiremock::matchers::body_string_contains("\"inlineData\""))
+        .and(wiremock::matchers::body_string_contains("ZmFrZV9wbmc="))
+        .and(wiremock::matchers::body_string_contains(
+            "ẢNH ĐỀ BÀI / TÀI LIỆU ĐÍNH KÈM (1 ảnh):",
+        ))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "candidates": [{
+                "content": {
+                    "parts": [{ "text": json_text }]
+                }
+            }]
+        })))
+        .mount(&server)
+        .await;
+
+    let client = GeminiClient::with_base_url("test-key", server.uri()).unwrap();
+    let uploaded = UploadedFile {
+        name: "files/1".into(),
+        uri: "https://example.com/files/1".into(),
+        mime_type: "video/mp4".into(),
+        state: "ACTIVE".into(),
+    };
+    let flex_rubric = Rubric::flexible("Tranh Unit 5", "Miêu tả bức tranh đính kèm", 10.0, Some(0.5));
+    let profile = PromptProfile::default();
+    let images = vec![AssignmentImage {
+        name: "tranh.png".into(),
+        mime_type: "image/png".into(),
+        data_base64: "ZmFrZV9wbmc=".into(),
+    }];
+
+    let res = client
+        .grade_video_with_images(
+            &uploaded,
+            &flex_rubric,
+            &profile,
+            "gemini-flash-lite-latest",
+            "presentation",
+            "vi",
+            None,
+            "",
+            &images,
+            MediaResolution::Low,
+            None,
+        )
+        .await
+        .unwrap();
+
+    // 3.5 + 4.3 = 7.8 -> rounded to step 0.5 = 8.0
+    assert_eq!(res.students[0].total_score, 8.0);
+    assert_eq!(res.students[0].max_total_score, 10.0);
 }

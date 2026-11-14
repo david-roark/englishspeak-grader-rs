@@ -21,10 +21,13 @@ pub use media::{
     DEFAULT_VIDEO_PRESET,
 };
 pub use paths::AppPaths;
-pub use prompts::{build_grading_prompt, build_prompt_parts, PromptParts, PromptProfile};
+pub use prompts::{
+    build_grading_prompt, build_prompt_parts, build_prompt_parts_with_images, PromptParts,
+    PromptProfile,
+};
 pub use rubrics::{
-    builtin_rubrics, fmt_num, format_result_markdown, get_builtin_rubric, Criterion,
-    CriterionLevel, Rubric,
+    builtin_rubrics, detect_image_mime, encode_base64, fmt_num, format_result_markdown,
+    get_builtin_rubric, AssignmentImage, Criterion, CriterionLevel, GradingAssignment, Rubric,
 };
 pub use schemas::{
     assessment_result_gemini_schema, AssessmentResult, CriterionScore, Evidence, StudentAssessment,

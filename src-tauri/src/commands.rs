@@ -3,10 +3,11 @@ use std::time::{Duration, Instant};
 
 use grader_core::export::{default_export_path, export_to_excel};
 use grader_core::{
-    build_prompt_parts, compress_video_to, extract_mp3_to, format_result_markdown, mp3_presets,
-    mute_video_to, probe_duration_secs, resolve_ffmpeg, trim_media_to, video_presets,
-    AssessmentDetail, AssessmentSummary, GeminiClient, MediaResolution, Mp3Preset, NewAssessment,
-    PromptParts, PromptProfile, Rubric, VideoPreset, DEFAULT_MODEL, FALLBACK_MODELS,
+    build_prompt_parts, compress_video_to, extract_mp3_to, fmt_num, format_result_markdown,
+    mp3_presets, mute_video_to, probe_duration_secs, resolve_ffmpeg, trim_media_to, video_presets,
+    AssessmentDetail, AssessmentSummary, AssignmentImage, GeminiClient, GradingAssignment,
+    MediaResolution, Mp3Preset, NewAssessment, PromptParts, PromptProfile, Rubric, VideoPreset,
+    DEFAULT_MODEL, FALLBACK_MODELS,
 };
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State};
@@ -29,6 +30,7 @@ pub struct AppBootstrap {
     pub video_presets: Vec<VideoPreset>,
     pub mp3_presets: Vec<Mp3Preset>,
     pub rubrics: Vec<Rubric>,
+    pub grading_assignments: Vec<GradingAssignment>,
     pub prompt_profile: PromptProfile,
     pub prompt_profiles: Vec<PromptProfile>,
     pub active_prompt_profile_id: String,
@@ -57,6 +59,16 @@ pub struct GradeRequest {
     pub extra_instructions: String,
     pub media_resolution: String,
     pub prompt_profile_id: Option<String>,
+    #[serde(default)]
+    pub grading_mode: Option<String>,
+    #[serde(default)]
+    pub assignment_name: Option<String>,
+    #[serde(default)]
+    pub flexible_max_score: Option<f64>,
+    #[serde(default)]
+    pub flexible_rounding_step: Option<f64>,
+    #[serde(default)]
+    pub images: Option<Vec<AssignmentImage>>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -144,6 +156,10 @@ pub fn get_bootstrap(state: State<'_, AppState>) -> Result<AppBootstrap, String>
     .map(|p| p.to_string_lossy().into_owned());
 
     let rubrics = state.db.list_rubrics().map_err(|e| e.to_string())?;
+    let grading_assignments = state
+        .db
+        .list_grading_assignments()
+        .map_err(|e| e.to_string())?;
     let prompt_profile = state.db.load_prompt_profile().map_err(|e| e.to_string())?;
     let prompt_profiles = state.db.list_prompt_profiles().map_err(|e| e.to_string())?;
     let active_prompt_profile_id = prompt_profile.id.clone();
@@ -163,6 +179,7 @@ pub fn get_bootstrap(state: State<'_, AppState>) -> Result<AppBootstrap, String>
         video_presets: video_presets().to_vec(),
         mp3_presets: mp3_presets().to_vec(),
         rubrics,
+        grading_assignments,
         prompt_profile,
         prompt_profiles,
         active_prompt_profile_id,
@@ -228,11 +245,44 @@ pub async fn grade_video_cmd(
     }
     state.media_server.authorize_path(&video_path);
 
-    let rubric = state
-        .db
-        .get_rubric(&req.rubric_id)
-        .map_err(|e| e.to_string())?
-        .ok_or_else(|| format!("Không tìm thấy rubric '{}'.", req.rubric_id))?;
+    let images = req.images.unwrap_or_default();
+    let is_flexible = req.grading_mode.as_deref() == Some("flexible");
+
+    let (rubric, extra_for_prompt) = if is_flexible {
+        if req.extra_instructions.trim().is_empty() && images.is_empty() {
+            return Err(
+                "Chế độ chấm linh hoạt cần nhập yêu cầu chấm hoặc đính kèm ít nhất 1 ảnh đề bài."
+                    .into(),
+            );
+        }
+        let max_score = req
+            .flexible_max_score
+            .filter(|v| v.is_finite() && *v > 0.0)
+            .unwrap_or(10.0);
+        let default_flex_name = format!("Chấm linh hoạt (Thang {})", fmt_num(max_score));
+        let display_name = req
+            .assignment_name
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .unwrap_or(default_flex_name.as_str());
+        (
+            Rubric::flexible(
+                display_name,
+                &req.extra_instructions,
+                max_score,
+                req.flexible_rounding_step,
+            ),
+            "",
+        )
+    } else {
+        let loaded = state
+            .db
+            .get_rubric(&req.rubric_id)
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| format!("Không tìm thấy rubric '{}'.", req.rubric_id))?;
+        (loaded, req.extra_instructions.as_str())
+    };
 
     let prompt_profile = match req
         .prompt_profile_id
@@ -290,7 +340,7 @@ pub async fn grade_video_cmd(
 
     let res_mode = MediaResolution::from_str_lossy(&req.media_resolution);
     let grade_res = client
-        .grade_video(
+        .grade_video_with_images(
             &uploaded,
             &rubric,
             &prompt_profile,
@@ -298,7 +348,8 @@ pub async fn grade_video_cmd(
             &req.task_type,
             &req.feedback_lang,
             names_opt,
-            &req.extra_instructions,
+            extra_for_prompt,
+            &images,
             res_mode,
             Some(&cancel),
         )
@@ -621,6 +672,51 @@ pub fn delete_custom_rubric(state: State<'_, AppState>, id: String) -> Result<Ve
         .delete_custom_rubric(&id)
         .map_err(|e| e.to_string())?;
     state.db.list_rubrics().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn list_grading_assignments(
+    state: State<'_, AppState>,
+) -> Result<Vec<GradingAssignment>, String> {
+    state
+        .db
+        .list_grading_assignments()
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn save_grading_assignment(
+    state: State<'_, AppState>,
+    assignment: GradingAssignment,
+) -> Result<Vec<GradingAssignment>, String> {
+    state
+        .db
+        .save_grading_assignment(&assignment)
+        .map_err(|e| e.to_string())?;
+    state
+        .db
+        .list_grading_assignments()
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn delete_grading_assignment(
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<Vec<GradingAssignment>, String> {
+    state
+        .db
+        .delete_grading_assignment(&id)
+        .map_err(|e| e.to_string())?;
+    state
+        .db
+        .list_grading_assignments()
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn load_image_file(path: String) -> Result<AssignmentImage, String> {
+    AssignmentImage::from_file(Path::new(&path)).map_err(|e| e.to_string())
 }
 
 #[tauri::command]

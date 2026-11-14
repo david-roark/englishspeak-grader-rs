@@ -128,6 +128,27 @@ export interface Mp3Preset {
   sample_rate: number;
 }
 
+export interface AssignmentImage {
+  name: string;
+  mime_type: string;
+  data_base64: string;
+}
+
+export interface GradingAssignment {
+  id: string;
+  name: string;
+  mode: "flexible" | "rubric" | string;
+  rubric_id?: string | null;
+  max_score: number;
+  rounding_step?: number | null;
+  requirements: string;
+  task_type: string;
+  feedback_lang: string;
+  prompt_profile_id?: string | null;
+  images: AssignmentImage[];
+  updated_at?: string;
+}
+
 export interface AppBootstrap {
   has_api_key: boolean;
   masked_api_key: string;
@@ -143,6 +164,7 @@ export interface AppBootstrap {
   video_presets: VideoPreset[];
   mp3_presets: Mp3Preset[];
   rubrics: Rubric[];
+  grading_assignments: GradingAssignment[];
   prompt_profile: PromptProfile;
   prompt_profiles: PromptProfile[];
   active_prompt_profile_id: string;

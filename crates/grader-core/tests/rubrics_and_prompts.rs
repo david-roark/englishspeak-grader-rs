@@ -1,10 +1,12 @@
 use std::collections::BTreeMap;
 
 use grader_core::prompts::{
-    build_grading_prompt, build_prompt_parts, merge_with_default, PromptProfile,
+    build_grading_prompt, build_prompt_parts, build_prompt_parts_with_images, merge_with_default,
+    PromptProfile,
 };
 use grader_core::rubrics::{
-    builtin_rubrics, format_result_markdown, get_builtin_rubric, Criterion, CriterionLevel, Rubric,
+    builtin_rubrics, detect_image_mime, encode_base64, format_result_markdown, get_builtin_rubric,
+    AssignmentImage, Criterion, CriterionLevel, Rubric,
 };
 use grader_core::schemas::{
     assessment_result_gemini_schema, AssessmentResult, CriterionScore, Evidence, StudentAssessment,
@@ -248,4 +250,141 @@ fn test_format_result_markdown_renders_students_and_evidence() {
     assert!(md.contains("### 1. An"));
     assert!(md.contains("### 2. Học sinh 2  _(tên tạm — cần gán lại)_"));
     assert!(md.contains("`00:32` — I really enjoy reading novels."));
+}
+
+#[test]
+fn test_flexible_rubric_scoring_normalization_and_prompt() {
+    let flex = Rubric::flexible(
+        "Speaking Unit 5",
+        "Trả lời đủ 4 câu hỏi (4đ), phát âm (6đ)",
+        10.0,
+        Some(0.5),
+    );
+    assert!(flex.is_flexible());
+    assert_eq!(flex.max_total(), 10.0);
+
+    let prompt_block = flex.to_prompt_block();
+    assert!(prompt_block.contains("CHẾ ĐỘ CHẤM LINH HOẠT THEO ĐỀ BÀI: Speaking Unit 5"));
+    assert!(prompt_block.contains("Trả lời đủ 4 câu hỏi (4đ), phát âm (6đ)"));
+
+    let mut res = AssessmentResult {
+        task_summary: "Unit 5".into(),
+        detected_language: "English".into(),
+        general_notes: String::new(),
+        students: vec![
+            StudentAssessment {
+                student_name: "An".into(),
+                name_confident: true,
+                criteria: vec![
+                    CriterionScore {
+                        criterion: "Nội dung".into(),
+                        score: 3.2,
+                        max_score: 4.0,
+                        comment: "Tốt".into(),
+                    },
+                    CriterionScore {
+                        criterion: "Phát âm".into(),
+                        score: 5.1,
+                        max_score: 6.0,
+                        comment: "Khá".into(),
+                    },
+                ],
+                total_score: 8.3,
+                max_total_score: 10.0,
+                overall_level: "Giỏi".into(),
+                strengths: vec![],
+                weaknesses: vec![],
+                improvement_suggestions: vec![],
+                practice_directions: vec![],
+                evidence: vec![],
+            },
+            StudentAssessment {
+                student_name: "Bình".into(),
+                name_confident: true,
+                criteria: vec![],
+                total_score: 14.2,
+                max_total_score: 20.0,
+                overall_level: "Đạt".into(),
+                strengths: vec![],
+                weaknesses: vec![],
+                improvement_suggestions: vec![],
+                practice_directions: vec![],
+                evidence: vec![],
+            },
+        ],
+    };
+    flex.normalize_assessment_result(&mut res);
+    // 3.2 + 5.1 = 8.3 -> rounded to 0.5 = 8.5
+    assert_eq!(res.students[0].total_score, 8.5);
+    assert_eq!(res.students[0].max_total_score, 10.0);
+    // Empty criteria clamped to [0, 10]
+    assert_eq!(res.students[1].total_score, 10.0);
+    assert_eq!(res.students[1].max_total_score, 10.0);
+
+    // Proportional scaling when AI outputs criteria summing to 10 on a 20-point scale
+    let flex20 = Rubric::flexible("Test 20", "Đề 20đ", 20.0, Some(0.5));
+    let (tot20, max20) = flex20.compute_total_score(&[
+        CriterionScore {
+            criterion: "A".into(),
+            score: 4.0,
+            max_score: 5.0,
+            comment: "".into(),
+        },
+        CriterionScore {
+            criterion: "B".into(),
+            score: 4.0,
+            max_score: 5.0,
+            comment: "".into(),
+        },
+    ]);
+    assert_eq!(max20, 20.0);
+    assert_eq!(tot20, 16.0);
+}
+
+#[test]
+fn test_build_prompt_parts_with_images_and_flexible_rules() {
+    let profile = PromptProfile::default();
+    let flex = Rubric::flexible("Đề tranh", "Miêu tả bức tranh", 10.0, Some(0.5));
+
+    let parts = build_prompt_parts_with_images(&profile, &flex, "presentation", "vi", None, "", 2);
+    assert!(parts
+        .user_prompt
+        .contains("ẢNH ĐỀ BÀI / TÀI LIỆU ĐÍNH KÈM (2 ảnh):"));
+    assert!(!parts.user_prompt.contains("không tự thêm/bớt tiêu chí"));
+    assert!(!parts.user_prompt.contains("GIỮ NGUYÊN như trong rubric"));
+}
+
+#[test]
+fn test_encode_base64_and_assignment_image_from_file() {
+    assert_eq!(encode_base64(b""), "");
+    assert_eq!(encode_base64(b"f"), "Zg==");
+    assert_eq!(encode_base64(b"fo"), "Zm8=");
+    assert_eq!(encode_base64(b"foo"), "Zm9v");
+    assert_eq!(encode_base64(b"foobar"), "Zm9vYmFy");
+
+    assert_eq!(
+        detect_image_mime(std::path::Path::new("slide.PNG")),
+        Some("image/png")
+    );
+    assert_eq!(
+        detect_image_mime(std::path::Path::new("photo.jpg")),
+        Some("image/jpeg")
+    );
+    assert_eq!(
+        detect_image_mime(std::path::Path::new("notes.txt")),
+        None
+    );
+
+    let dir = tempfile::TempDir::new().unwrap();
+    let img_path = dir.path().join("exam.png");
+    std::fs::write(&img_path, b"foobar").unwrap();
+    let loaded = AssignmentImage::from_file(&img_path).unwrap();
+    assert_eq!(loaded.name, "exam.png");
+    assert_eq!(loaded.mime_type, "image/png");
+    assert_eq!(loaded.data_base64, "Zm9vYmFy");
+
+    let bad_path = dir.path().join("notes.txt");
+    std::fs::write(&bad_path, b"text").unwrap();
+    assert!(AssignmentImage::from_file(&bad_path).is_err());
+    assert!(AssignmentImage::from_file(&dir.path().join("missing.png")).is_err());
 }
