@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024" fill="none">
+  <defs>
+    <linearGradient id="bgGrad" x1="128" y1="64" x2="896" y2="960" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#6366F1" />
+      <stop offset="55%" stop-color="#4F46E5" />
+      <stop offset="100%" stop-color="#3730A3" />
+    </linearGradient>
+    <linearGradient id="badgeGrad" x1="636" y1="556" x2="836" y2="756" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#34D399" />
+      <stop offset="100%" stop-color="#059669" />
+    </linearGradient>
+  </defs>
+
+  <!-- App Icon Base -->
+  <rect x="32" y="32" width="960" height="960" rx="224" fill="url(#bgGrad)" />
+  <rect x="44" y="44" width="936" height="936" rx="212" stroke="#FFFFFF" stroke-opacity="0.16" stroke-width="8" />
+
+  <!-- Speech Bubble (Speaking / Language) -->
+  <path
+    d="M 272 240 H 704 C 757.02 240 800 282.98 800 336 V 568 C 800 621.02 757.02 664 704 664 H 392 L 244 776 C 228.5 787.7 208 776.6 208 757.2 V 656.5 C 188.3 639.1 176 613.7 176 585.5 V 336 C 176 282.98 218.98 240 272 240 Z"
+    fill="#FFFFFF"
+  />
+
+  <!-- Voice Waveform Bars (Speech / Audio) -->
+  <rect x="320" y="388" width="56" height="128" rx="28" fill="#4F46E5" />
+  <rect x="424" y="332" width="56" height="240" rx="28" fill="#4F46E5" />
+  <rect x="528" y="368" width="56" height="168" rx="28" fill="#4F46E5" />
+  <rect x="632" y="412" width="56" height="80" rx="28" fill="#6366F1" fill-opacity="0.85" />
+
+  <!-- Grading Checkmark Badge (AI Assessment) -->
+  <circle cx="740" cy="660" r="156" fill="#4338CA" />
+  <circle cx="740" cy="660" r="136" fill="url(#badgeGrad)" />
+  <path
+    d="M 676 662 L 720 706 L 808 614"
+    stroke="#FFFFFF"
+    stroke-width="36"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  />
+</svg>

@@ -4,7 +4,6 @@ import {
   ChevronDown,
   ChevronUp,
   Film,
-  GraduationCap,
   History,
   KeyRound,
   RefreshCw,
@@ -103,7 +102,28 @@ export function App() {
             <div className="flex flex-wrap items-center gap-3 lg:gap-5">
               <div className="flex items-center gap-2.5">
                 <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-indigo-600 text-white shadow-xs">
-                  <GraduationCap className="h-5 w-5" />
+                  <svg
+                    viewBox="0 0 24 24"
+                    className="h-5 w-5"
+                    fill="none"
+                    aria-hidden="true"
+                  >
+                    <path
+                      d="M5.5 4.5h11A2.5 2.5 0 0 1 19 7v5.5a2.5 2.5 0 0 1-2.5 2.5H9.2l-3.4 2.6c-.45.34-1.05.02-1.05-.54V14.8A2.5 2.5 0 0 1 3 12.4V7A2.5 2.5 0 0 1 5.5 4.5Z"
+                      fill="currentColor"
+                    />
+                    <rect x="7" y="8.2" width="1.6" height="3.6" rx="0.8" fill="#4f46e5" />
+                    <rect x="10.2" y="6.8" width="1.6" height="6.4" rx="0.8" fill="#4f46e5" />
+                    <rect x="13.4" y="7.8" width="1.6" height="4.4" rx="0.8" fill="#4f46e5" />
+                    <circle cx="17.5" cy="16.5" r="4.2" fill="#10b981" stroke="#4f46e5" strokeWidth="1.2" />
+                    <path
+                      d="m15.7 16.6 1.2 1.2 2.4-2.5"
+                      stroke="#ffffff"
+                      strokeWidth="1.5"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
                 </div>
                 <div className="leading-tight">
                   <h1 className="text-sm font-bold tracking-tight text-slate-900 sm:text-base">
