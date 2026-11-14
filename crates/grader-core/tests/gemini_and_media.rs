@@ -697,6 +697,12 @@ fn test_embed_subtitles_args_with_fontsdir_and_dimension_parser() {
         args[vf_idx + 1],
         r"ass=/tmp/sub/demo\:1.ass:fontsdir=/app/public/fonts\:v2"
     );
+    assert!(args
+        .windows(2)
+        .any(|w| w[0] == "-map_metadata" && w[1] == "-1"));
+    assert!(args
+        .windows(2)
+        .any(|w| w[0] == "-metadata" && w[1] == "title= "));
 
     let soft_args = build_embed_subtitles_video_args_with_fonts_to(
         Path::new("/tmp/in.mp4"),

@@ -12,9 +12,9 @@ use grader_core::rubrics::{
 use grader_core::schemas::{
     assessment_result_gemini_schema, format_transcript_ass, format_transcript_ass_with_options,
     format_transcript_markdown, format_transcript_srt, format_transcript_srt_with_mode,
-    format_transcript_text, transcript_result_gemini_schema, AssSubtitleOptions, AssessmentResult,
-    CriterionScore, Evidence, StudentAssessment, TranscriptResult, TranscriptSegment,
-    TranscriptSpeaker,
+    format_transcript_srt_with_options, format_transcript_text, transcript_result_gemini_schema,
+    AssSubtitleOptions, AssessmentResult, CriterionScore, Evidence, StudentAssessment,
+    TranscriptResult, TranscriptSegment, TranscriptSpeaker,
 };
 
 fn sample_result() -> AssessmentResult {
@@ -605,6 +605,7 @@ fn test_format_transcript_ass_with_options_fonts_icons_and_portrait() {
         font_name: "Lexend".into(),
         play_res_x: 720,
         play_res_y: 1280,
+        ..Default::default()
     };
     let portrait_ass = format_transcript_ass_with_options(&sample, &portrait_opts);
     assert!(portrait_ass.contains("PlayResX: 720"));
@@ -616,4 +617,68 @@ fn test_format_transcript_ass_with_options_fonts_icons_and_portrait() {
     // \u{26A0}\u{FE0F} ("⚠️") phải bỏ variation selector \u{FE0F} để Noto Emoji vẽ sạch
     assert!(portrait_ass.contains(r"{\fnNoto Emoji}⚠{\fn}"));
     assert!(!portrait_ass.contains('\u{FE0F}'));
+
+    // Ẩn vai trò -> chỉ còn [Cô Lan]:
+    let no_role_ass = format_transcript_ass_with_options(
+        &sample,
+        &AssSubtitleOptions {
+            show_role: false,
+            ..Default::default()
+        },
+    );
+    assert!(no_role_ass.contains("[Cô Lan]:"));
+    assert!(!no_role_ass.contains("[Giáo viên - Cô Lan]:"));
+
+    // Ẩn tên -> chỉ còn [Giáo viên]:
+    let no_speaker_ass = format_transcript_ass_with_options(
+        &sample,
+        &AssSubtitleOptions {
+            show_speaker: false,
+            ..Default::default()
+        },
+    );
+    assert!(no_speaker_ass.contains("[Giáo viên]:"));
+    assert!(!no_speaker_ass.contains("Cô Lan"));
+
+    // Ẩn cả vai trò và tên + ẩn dịch + ẩn sửa lỗi -> chỉ lời thoại thuần cho cả ASS & SRT
+    let clean_opts = AssSubtitleOptions {
+        show_role: false,
+        show_speaker: false,
+        show_text: true,
+        show_translation: Some(false),
+        show_grammar: Some(false),
+        ..Default::default()
+    };
+    let clean_ass = format_transcript_ass_with_options(&sample, &clean_opts);
+    assert!(!clean_ass.contains("[Cô Lan]"));
+    assert!(!clean_ass.contains("[Giáo viên]"));
+    assert!(!clean_ass.contains("Dịch:"));
+    assert!(!clean_ass.contains("Sửa:"));
+    assert!(clean_ass.contains("Xin chào "));
+
+    let clean_srt = format_transcript_srt_with_options(&sample, &clean_opts);
+    assert!(!clean_srt.contains("[Cô Lan]"));
+    assert!(!clean_srt.contains("[Giáo viên]"));
+    assert!(!clean_srt.contains("Chào cả lớp"));
+    assert!(!clean_srt.contains("Sửa:"));
+    assert!(clean_srt.contains("Xin chào 🎓 Good job ✅"));
+
+    // Ẩn lời thoại gốc, chỉ hiện bản dịch & sửa lỗi
+    let no_text_ass = format_transcript_ass_with_options(
+        &sample,
+        &AssSubtitleOptions {
+            show_text: false,
+            ..Default::default()
+        },
+    );
+    assert!(!no_text_ass.contains("Good job"));
+    assert!(no_text_ass.contains("Dịch:"));
+    assert!(no_text_ass.contains("Sửa:"));
+
+    // Khử trùng lặp khi speaker_label trùng "Giáo viên"
+    let mut dup_sample = sample.clone();
+    dup_sample.segments[0].speaker_label = "Giáo viên".into();
+    let dedup_ass = format_transcript_ass_with_options(&dup_sample, &AssSubtitleOptions::default());
+    assert!(dedup_ass.contains("[Giáo viên]:"));
+    assert!(!dedup_ass.contains("[Giáo viên - Giáo viên]:"));
 }

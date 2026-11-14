@@ -108,6 +108,28 @@ function roleBadgeStyle(role: string): { label: string; badgeClass: string } {
   }
 }
 
+function formatPreviewSpeakerPrefix(
+  seg: TranscriptSegment,
+  showSpeaker: boolean,
+  showRole: boolean
+): string | null {
+  if (!showSpeaker && !showRole) return null;
+  const roleKey = seg.role.trim().toLowerCase();
+  const roleVi = roleBadgeStyle(roleKey).label;
+  const label = seg.speaker_label.trim() || roleVi;
+  if (showSpeaker && showRole) {
+    if (roleKey === "teacher") {
+      const labelLower = label.toLowerCase();
+      const roleLower = roleVi.toLowerCase();
+      return labelLower === roleLower || labelLower.startsWith(roleLower)
+        ? label
+        : `${roleVi} - ${label}`;
+    }
+    return label;
+  }
+  return showSpeaker ? label : roleVi;
+}
+
 function buildMarkdownScript(result: TranscriptResult, sourceName: string): string {
   const lines: string[] = [
     `# Script bài nói: ${sourceName}`,
@@ -239,9 +261,11 @@ export function MediaToolsPage({
   const [playerCurrentTime, setPlayerCurrentTime] = useState(0);
   const [editingSegIdx, setEditingSegIdx] = useState<number | null>(null);
   const [burnMode, setBurnMode] = useState<"hardsub" | "softsub">("hardsub");
-  const [subtitleContentMode, setSubtitleContentMode] = useState<
-    "all" | "with_grammar" | "bilingual" | "text_only"
-  >("all");
+  const [showSubRole, setShowSubRole] = useState(true);
+  const [showSubSpeaker, setShowSubSpeaker] = useState(true);
+  const [showSubText, setShowSubText] = useState(true);
+  const [showSubTranslation, setShowSubTranslation] = useState(true);
+  const [showSubGrammar, setShowSubGrammar] = useState(true);
   const [subtitleFont, setSubtitleFont] = useState<
     "Be Vietnam Pro" | "Noto Sans" | "Lexend"
   >("Be Vietnam Pro");
@@ -552,8 +576,13 @@ export function MediaToolsPage({
         video_path: sourceFile.path,
         transcript: scriptResult.transcript,
         burn_mode: burnMode,
-        content_mode: subtitleContentMode,
+        content_mode: "all",
         font_name: subtitleFont,
+        show_role: showSubRole,
+        show_speaker: showSubSpeaker,
+        show_text: showSubText,
+        show_translation: showSubTranslation,
+        show_grammar: showSubGrammar,
         out_dir_override: overrides.outDirOverride,
         out_path_override: mp4PathOverride,
       });
@@ -883,30 +912,64 @@ export function MediaToolsPage({
                   </span>
                 </div>
                 {activePreviewSegment ? (
-                  <div className="mt-1.5 space-y-0.5 text-center">
-                    <p className="text-xs leading-snug">
-                      <span
-                        className={`font-bold ${
-                          activePreviewSegment.role === "teacher"
-                            ? "text-amber-300"
-                            : "text-emerald-300"
-                        }`}
-                      >
-                        [{activePreviewSegment.speaker_label}]:
-                      </span>{" "}
-                      {activePreviewSegment.text}
-                    </p>
-                    {activePreviewSegment.translation.trim() && (
-                      <p className="text-[11px] italic text-slate-300">
-                        {activePreviewSegment.translation}
-                      </p>
-                    )}
-                    {activePreviewSegment.grammar_note.trim() && (
-                      <p className="text-[11px] text-sky-300">
-                        💡 Sửa: {activePreviewSegment.grammar_note}
-                      </p>
-                    )}
-                  </div>
+                  (() => {
+                    const prefix = formatPreviewSpeakerPrefix(
+                      activePreviewSegment,
+                      showSubSpeaker,
+                      showSubRole
+                    );
+                    const hasText =
+                      showSubText &&
+                      activePreviewSegment.text.trim().length > 0;
+                    const hasTrans =
+                      showSubTranslation &&
+                      activePreviewSegment.translation.trim().length > 0;
+                    const hasGram =
+                      showSubGrammar &&
+                      activePreviewSegment.grammar_note.trim().length > 0;
+                    if (!hasText && !hasTrans && !hasGram) {
+                      return (
+                        <p className="mt-1.5 text-center text-[11px] italic text-slate-400">
+                          Các thành phần phụ đề của đoạn này đang được tắt hiển thị.
+                        </p>
+                      );
+                    }
+                    const prefixSpan = prefix ? (
+                      <>
+                        <span
+                          className={`font-bold ${
+                            activePreviewSegment.role === "teacher"
+                              ? "text-amber-300"
+                              : "text-emerald-300"
+                          }`}
+                        >
+                          [{prefix}]:
+                        </span>{" "}
+                      </>
+                    ) : null;
+                    return (
+                      <div className="mt-1.5 space-y-0.5 text-center">
+                        {hasText && (
+                          <p className="text-xs leading-snug">
+                            {prefixSpan}
+                            {activePreviewSegment.text}
+                          </p>
+                        )}
+                        {hasTrans && (
+                          <p className="text-[11px] italic text-slate-300">
+                            {!hasText && prefixSpan}
+                            {activePreviewSegment.translation}
+                          </p>
+                        )}
+                        {hasGram && (
+                          <p className="text-[11px] text-sky-300">
+                            {!hasText && !hasTrans && prefixSpan}
+                            💡 Sửa: {activePreviewSegment.grammar_note}
+                          </p>
+                        )}
+                      </div>
+                    );
+                  })()
                 ) : (
                   <p className="mt-1.5 text-center text-[11px] italic text-slate-400">
                     Bấm phát hoặc chọn mốc thời gian để xem trước phụ đề chạy theo video...
@@ -1480,7 +1543,7 @@ export function MediaToolsPage({
                     </span>
                   </div>
                   <div className="mt-2.5 space-y-2.5">
-                    <div className="grid gap-2.5 sm:grid-cols-3">
+                    <div className="grid gap-2.5 sm:grid-cols-2">
                       <div>
                         <label className="block text-[11px] font-semibold text-slate-700">
                           Kiểu ghép phụ đề
@@ -1501,36 +1564,6 @@ export function MediaToolsPage({
                           <option value="softsub">
                             Phụ đề mềm (Softsub mov_text — Xuất cực nhanh)
                           </option>
-                        </select>
-                      </div>
-                      <div>
-                        <label className="block text-[11px] font-semibold text-slate-700">
-                          Nội dung hiển thị trên video
-                        </label>
-                        <select
-                          value={subtitleContentMode}
-                          onChange={(e) =>
-                            setSubtitleContentMode(
-                              e.target.value as
-                                | "all"
-                                | "with_grammar"
-                                | "bilingual"
-                                | "text_only"
-                            )
-                          }
-                          aria-label="Nội dung phụ đề trên video"
-                          className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-800 focus:border-indigo-400 focus:outline-none"
-                        >
-                          <option value="all">
-                            Đầy đủ (Lời thoại + Dịch + Gợi ý sửa)
-                          </option>
-                          <option value="with_grammar">
-                            Lời thoại + Gợi ý sửa lỗi
-                          </option>
-                          <option value="bilingual">
-                            Song ngữ (Lời thoại + Dịch Việt)
-                          </option>
-                          <option value="text_only">Chỉ lời thoại gốc</option>
                         </select>
                       </div>
                       <div>
@@ -1563,9 +1596,105 @@ export function MediaToolsPage({
                         </select>
                       </div>
                     </div>
+
+                    <div className="rounded-lg border border-indigo-200/80 bg-white/80 p-2.5">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <span className="text-[11px] font-semibold text-slate-700">
+                          Thành phần hiển thị trên phụ đề (đồng bộ Xem trước &amp; Video):
+                        </span>
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setShowSubRole(true);
+                              setShowSubSpeaker(true);
+                              setShowSubText(true);
+                              setShowSubTranslation(true);
+                              setShowSubGrammar(true);
+                            }}
+                            className="rounded border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-semibold text-slate-700 hover:border-indigo-300 hover:bg-indigo-50"
+                          >
+                            Hiện đầy đủ
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setShowSubRole(false);
+                              setShowSubSpeaker(false);
+                              setShowSubText(true);
+                              setShowSubTranslation(false);
+                              setShowSubGrammar(false);
+                            }}
+                            className="rounded border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-semibold text-slate-700 hover:border-indigo-300 hover:bg-indigo-50"
+                          >
+                            Chỉ lời thoại sạch
+                          </button>
+                        </div>
+                      </div>
+                      <div className="mt-2 flex flex-wrap gap-1.5">
+                        {[
+                          {
+                            id: "role",
+                            label: "Vai trò (GV/HS)",
+                            checked: showSubRole,
+                            onChange: setShowSubRole,
+                          },
+                          {
+                            id: "speaker",
+                            label: "Tên người nói",
+                            checked: showSubSpeaker,
+                            onChange: setShowSubSpeaker,
+                          },
+                          {
+                            id: "text",
+                            label: "Lời thoại gốc",
+                            checked: showSubText,
+                            onChange: setShowSubText,
+                          },
+                          {
+                            id: "translation",
+                            label: "Bản dịch tiếng Việt",
+                            checked: showSubTranslation,
+                            onChange: setShowSubTranslation,
+                          },
+                          {
+                            id: "grammar",
+                            label: "Gợi ý sửa lỗi",
+                            checked: showSubGrammar,
+                            onChange: setShowSubGrammar,
+                          },
+                        ].map((item) => (
+                          <label
+                            key={item.id}
+                            className={`inline-flex cursor-pointer select-none items-center gap-1.5 rounded-md border px-2 py-1 text-[11px] font-medium transition ${
+                              item.checked
+                                ? "border-indigo-300 bg-indigo-50 text-indigo-900"
+                                : "border-slate-200 bg-slate-50 text-slate-500 hover:bg-slate-100"
+                            }`}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={item.checked}
+                              onChange={(e) => item.onChange(e.target.checked)}
+                              className="h-3.5 w-3.5 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                            />
+                            {item.label}
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+
                     <div className="flex flex-wrap items-center justify-between gap-2">
-                      <span className="text-[11px] text-slate-500">
-                        {burnMode === "hardsub"
+                      <span
+                        className={`text-[11px] ${
+                          !showSubText && !showSubTranslation && !showSubGrammar
+                            ? "font-medium text-rose-600"
+                            : "text-slate-500"
+                        }`}
+                      >
+                        {!showSubText && !showSubTranslation && !showSubGrammar
+                          ? "Hãy bật ít nhất 1 nội dung (Lời thoại, Dịch hoặc Gợi ý sửa)."
+                          : burnMode === "hardsub"
                           ? "Tự đóng gói Noto Emoji vector & tự chỉnh cỡ chữ theo video ngang/dọc."
                           : "Softsub dùng font mặc định của trình phát video."}
                       </span>
@@ -1575,7 +1704,10 @@ export function MediaToolsPage({
                         disabled={
                           taskId !== null ||
                           !ffmpegAvailable ||
-                          scriptResult.transcript.segments.length === 0
+                          scriptResult.transcript.segments.length === 0 ||
+                          (!showSubText &&
+                            !showSubTranslation &&
+                            !showSubGrammar)
                         }
                         className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-indigo-600 px-3.5 py-1.5 text-xs font-bold text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
                       >

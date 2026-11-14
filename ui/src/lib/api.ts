@@ -214,6 +214,11 @@ export const api = {
     burn_mode: "hardsub" | "softsub";
     content_mode: "all" | "with_grammar" | "bilingual" | "text_only";
     font_name?: string;
+    show_role?: boolean;
+    show_speaker?: boolean;
+    show_text?: boolean;
+    show_translation?: boolean;
+    show_grammar?: boolean;
     out_dir_override?: string;
     out_path_override?: string;
   }) => invoke<MediaOutput>("embed_subtitles_video_cmd", { req }),

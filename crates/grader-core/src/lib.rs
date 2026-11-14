@@ -36,7 +36,7 @@ pub use rubrics::{
 pub use schemas::{
     assessment_result_gemini_schema, format_transcript_ass, format_transcript_ass_with_options,
     format_transcript_markdown, format_transcript_srt, format_transcript_srt_with_mode,
-    format_transcript_text, transcript_result_gemini_schema, AssSubtitleOptions, AssessmentResult,
-    CriterionScore, Evidence, StudentAssessment, TranscriptResult, TranscriptSegment,
-    TranscriptSpeaker,
+    format_transcript_srt_with_options, format_transcript_text, transcript_result_gemini_schema,
+    AssSubtitleOptions, AssessmentResult, CriterionScore, Evidence, StudentAssessment,
+    TranscriptResult, TranscriptSegment, TranscriptSpeaker,
 };

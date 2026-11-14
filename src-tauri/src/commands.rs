@@ -5,12 +5,12 @@ use grader_core::export::{default_export_path, export_to_excel};
 use grader_core::{
     build_prompt_parts, compress_video_to, embed_subtitles_video_with_fonts_to, extract_mp3_to,
     extract_speech_mp3_to, fmt_num, format_result_markdown, format_transcript_ass_with_options,
-    format_transcript_markdown, format_transcript_srt_with_mode, format_transcript_text,
-    mp3_presets, mute_video_to, probe_duration_secs, probe_video_dimensions, resolve_ffmpeg,
-    trim_media_to, video_presets, AssSubtitleOptions, AssessmentDetail, AssessmentSummary,
-    AssignmentImage, GeminiClient, GradingAssignment, MediaResolution, Mp3Preset, NewAssessment,
-    PromptParts, PromptProfile, Rubric, TranscribeOptions, TranscriptResult, VideoPreset,
-    DEFAULT_MODEL, FALLBACK_MODELS,
+    format_transcript_markdown, format_transcript_srt_with_mode,
+    format_transcript_srt_with_options, format_transcript_text, mp3_presets, mute_video_to,
+    probe_duration_secs, probe_video_dimensions, resolve_ffmpeg, trim_media_to, video_presets,
+    AssSubtitleOptions, AssessmentDetail, AssessmentSummary, AssignmentImage, GeminiClient,
+    GradingAssignment, MediaResolution, Mp3Preset, NewAssessment, PromptParts, PromptProfile,
+    Rubric, TranscribeOptions, TranscriptResult, VideoPreset, DEFAULT_MODEL, FALLBACK_MODELS,
 };
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State};
@@ -140,6 +140,16 @@ pub struct EmbedSubtitlesRequest {
     pub content_mode: String,
     #[serde(default)]
     pub font_name: Option<String>,
+    #[serde(default)]
+    pub show_role: Option<bool>,
+    #[serde(default)]
+    pub show_speaker: Option<bool>,
+    #[serde(default)]
+    pub show_text: Option<bool>,
+    #[serde(default)]
+    pub show_translation: Option<bool>,
+    #[serde(default)]
+    pub show_grammar: Option<bool>,
     pub out_dir_override: Option<String>,
     pub out_path_override: Option<String>,
 }
@@ -987,24 +997,33 @@ pub async fn embed_subtitles_video_cmd(
         .chars()
         .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
         .collect();
-    let (sub_ext, sub_content) = if burn_in {
-        let (play_res_x, play_res_y) = match probe_video_dimensions(&ffmpeg, &src).await {
+    let (play_res_x, play_res_y) = if burn_in {
+        match probe_video_dimensions(&ffmpeg, &src).await {
             Some((w, h)) if w < h => (720, 1280),
             _ => (1280, 720),
-        };
-        let font_name = req
-            .font_name
-            .as_deref()
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-            .unwrap_or("Be Vietnam Pro")
-            .to_string();
-        let options = AssSubtitleOptions {
-            content_mode: req.content_mode.clone(),
-            font_name,
-            play_res_x,
-            play_res_y,
-        };
+        }
+    } else {
+        (1280, 720)
+    };
+    let font_name = req
+        .font_name
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or("Be Vietnam Pro")
+        .to_string();
+    let options = AssSubtitleOptions {
+        content_mode: req.content_mode.clone(),
+        font_name,
+        play_res_x,
+        play_res_y,
+        show_role: req.show_role.unwrap_or(true),
+        show_speaker: req.show_speaker.unwrap_or(true),
+        show_text: req.show_text.unwrap_or(true),
+        show_translation: req.show_translation,
+        show_grammar: req.show_grammar,
+    };
+    let (sub_ext, sub_content) = if burn_in {
         (
             "ass",
             format_transcript_ass_with_options(&req.transcript, &options),
@@ -1012,7 +1031,7 @@ pub async fn embed_subtitles_video_cmd(
     } else {
         (
             "srt",
-            format_transcript_srt_with_mode(&req.transcript, &req.content_mode),
+            format_transcript_srt_with_options(&req.transcript, &options),
         )
     };
     let temp_sub_path = std::env::temp_dir().join(format!("englishspeak_sub_{safe_id}.{sub_ext}"));

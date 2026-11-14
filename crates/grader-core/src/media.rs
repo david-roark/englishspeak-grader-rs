@@ -535,6 +535,10 @@ pub fn build_embed_subtitles_video_args_with_fonts_to(
     }
 
     args.extend([
+        "-map_metadata".into(),
+        "-1".into(),
+        "-metadata".into(),
+        "title= ".into(),
         "-movflags".into(),
         "+faststart".into(),
         "-progress".into(),

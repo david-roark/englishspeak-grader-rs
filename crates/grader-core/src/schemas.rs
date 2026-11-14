@@ -324,6 +324,38 @@ fn effective_segment_label(seg: &TranscriptSegment) -> &str {
     }
 }
 
+fn format_speaker_prefix(
+    seg: &TranscriptSegment,
+    show_speaker: bool,
+    show_role: bool,
+) -> Option<String> {
+    if !show_speaker && !show_role {
+        return None;
+    }
+    let role_key = seg.role.trim().to_ascii_lowercase();
+    let role_vi = role_display_vi(&role_key);
+    let label = effective_segment_label(seg).trim();
+
+    match (show_speaker, show_role) {
+        (true, true) => {
+            if role_key == "teacher" {
+                let role_lower = role_vi.to_lowercase();
+                let label_lower = label.to_lowercase();
+                if label.eq_ignore_ascii_case(role_vi) || label_lower.starts_with(&role_lower) {
+                    Some(label.to_string())
+                } else {
+                    Some(format!("{role_vi} - {label}"))
+                }
+            } else {
+                Some(label.to_string())
+            }
+        }
+        (true, false) => Some(label.to_string()),
+        (false, true) => Some(role_vi.to_string()),
+        (false, false) => None,
+    }
+}
+
 /// Xuất script sang định dạng phụ đề chuẩn SubRip (`.srt`).
 pub fn format_transcript_srt(result: &TranscriptResult) -> String {
     format_transcript_srt_with_mode(result, "bilingual")
@@ -331,29 +363,47 @@ pub fn format_transcript_srt(result: &TranscriptResult) -> String {
 
 /// Xuất script sang `.srt` theo chế độ nội dung (`text_only`, `bilingual`, `with_grammar`, `all`).
 pub fn format_transcript_srt_with_mode(result: &TranscriptResult, content_mode: &str) -> String {
-    let (include_translation, include_grammar) = subtitle_content_flags(content_mode);
+    let opts = AssSubtitleOptions {
+        content_mode: content_mode.to_string(),
+        show_role: false,
+        ..Default::default()
+    };
+    format_transcript_srt_with_options(result, &opts)
+}
+
+/// Xuất script sang `.srt` kèm các cờ ẩn/hiện từng thành phần phụ đề (vai trò, tên, lời thoại, dịch, sửa lỗi).
+pub fn format_transcript_srt_with_options(
+    result: &TranscriptResult,
+    opts: &AssSubtitleOptions,
+) -> String {
+    let (include_translation, include_grammar) = resolve_subtitle_flags(opts);
     let mut blocks = Vec::new();
     for (idx, seg) in result.segments.iter().enumerate() {
         let (start_secs, end_secs) = segment_time_bounds(idx, seg);
-        let label = effective_segment_label(seg);
+        let mut lines_in_block: Vec<String> = Vec::new();
 
-        let mut content = format!("[{label}]: {}", seg.text.trim());
+        if opts.show_text && !seg.text.trim().is_empty() {
+            lines_in_block.push(seg.text.trim().to_string());
+        }
         if include_translation && !seg.translation.trim().is_empty() {
-            content.push('\n');
-            content.push_str(seg.translation.trim());
+            lines_in_block.push(seg.translation.trim().to_string());
         }
         if include_grammar && !seg.grammar_note.trim().is_empty() {
-            content.push('\n');
-            content.push_str("💡 Sửa: ");
-            content.push_str(seg.grammar_note.trim());
+            lines_in_block.push(format!("💡 Sửa: {}", seg.grammar_note.trim()));
+        }
+        if lines_in_block.is_empty() {
+            continue;
+        }
+        if let Some(prefix) = format_speaker_prefix(seg, opts.show_speaker, opts.show_role) {
+            lines_in_block[0] = format!("[{prefix}]: {}", lines_in_block[0]);
         }
 
         blocks.push(format!(
             "{}\n{} --> {}\n{}",
-            idx + 1,
+            blocks.len() + 1,
             format_srt_timestamp(start_secs),
             format_srt_timestamp(end_secs),
-            content
+            lines_in_block.join("\n")
         ));
     }
     if blocks.is_empty() {
@@ -420,13 +470,18 @@ fn escape_ass_text(raw: &str) -> String {
     out
 }
 
-/// Tùy chọn định dạng phụ đề ASS (font chữ, chế độ nội dung và khung hình tham chiếu).
+/// Tùy chọn định dạng phụ đề ASS/SRT (font chữ, chế độ nội dung, khung hình và cờ ẩn/hiện từng thành phần).
 #[derive(Debug, Clone)]
 pub struct AssSubtitleOptions {
     pub content_mode: String,
     pub font_name: String,
     pub play_res_x: u32,
     pub play_res_y: u32,
+    pub show_role: bool,
+    pub show_speaker: bool,
+    pub show_text: bool,
+    pub show_translation: Option<bool>,
+    pub show_grammar: Option<bool>,
 }
 
 impl Default for AssSubtitleOptions {
@@ -436,8 +491,21 @@ impl Default for AssSubtitleOptions {
             font_name: "Be Vietnam Pro".to_string(),
             play_res_x: 1280,
             play_res_y: 720,
+            show_role: true,
+            show_speaker: true,
+            show_text: true,
+            show_translation: None,
+            show_grammar: None,
         }
     }
+}
+
+fn resolve_subtitle_flags(opts: &AssSubtitleOptions) -> (bool, bool) {
+    let (mode_trans, mode_gram) = subtitle_content_flags(&opts.content_mode);
+    (
+        opts.show_translation.unwrap_or(mode_trans),
+        opts.show_grammar.unwrap_or(mode_gram),
+    )
 }
 
 /// Xuất script sang định dạng ASS (`.ass`) với font, kích thước khung hình và màu vai trò tùy chỉnh.
@@ -445,7 +513,7 @@ pub fn format_transcript_ass_with_options(
     result: &TranscriptResult,
     opts: &AssSubtitleOptions,
 ) -> String {
-    let (include_translation, include_grammar) = subtitle_content_flags(&opts.content_mode);
+    let (include_translation, include_grammar) = resolve_subtitle_flags(opts);
     let play_res_x = opts.play_res_x.max(320);
     let play_res_y = opts.play_res_y.max(320);
     let clean_font: String = opts
@@ -498,32 +566,45 @@ pub fn format_transcript_ass_with_options(
 
     for (idx, seg) in result.segments.iter().enumerate() {
         let (start_secs, end_secs) = segment_time_bounds(idx, seg);
-        let label = escape_ass_text(effective_segment_label(seg));
-        let speaker_tag = match seg.role.trim().to_ascii_lowercase().as_str() {
-            "teacher" => format!("{{\\b1\\c&H00D4FF&}}[Giáo viên - {label}]:{{\\b0\\c&HFFFFFF&}}"),
-            "student" => format!("{{\\b1\\c&H80FF80&}}[{label}]:{{\\b0\\c&HFFFFFF&}}"),
-            _ => format!("{{\\b1\\c&HFFCC80&}}[{label}]:{{\\b0\\c&HFFFFFF&}}"),
-        };
+        let speaker_tag =
+            format_speaker_prefix(seg, opts.show_speaker, opts.show_role).map(|prefix| {
+                let escaped_prefix = escape_ass_text(&prefix);
+                let color = match seg.role.trim().to_ascii_lowercase().as_str() {
+                    "teacher" => "&H00D4FF&",
+                    "student" => "&H80FF80&",
+                    _ => "&HFFCC80&",
+                };
+                format!("{{\\b1\\c{color}}}[{escaped_prefix}]:{{\\b0\\c&HFFFFFF&}}")
+            });
 
-        let mut dialogue_text = format!("{speaker_tag} {}", escape_ass_text(&seg.text));
+        let mut parts: Vec<String> = Vec::new();
+        if opts.show_text && !seg.text.trim().is_empty() {
+            parts.push(escape_ass_text(&seg.text));
+        }
         if include_translation && !seg.translation.trim().is_empty() {
-            dialogue_text.push_str(&format!(
-                "\\N{{\\fs{secondary_fs}\\c&HE8E8E8&}}Dịch: {}",
+            parts.push(format!(
+                "{{\\fs{secondary_fs}\\c&HE8E8E8&}}Dịch: {}",
                 escape_ass_text(&seg.translation)
             ));
         }
         if include_grammar && !seg.grammar_note.trim().is_empty() {
-            dialogue_text.push_str(&format!(
-                "\\N{{\\fs{secondary_fs}\\c&H80D8FF&}}Sửa: {}",
+            parts.push(format!(
+                "{{\\fs{secondary_fs}\\c&H80D8FF&}}Sửa: {}",
                 escape_ass_text(&seg.grammar_note)
             ));
+        }
+        if parts.is_empty() {
+            continue;
+        }
+        if let Some(tag) = speaker_tag {
+            parts[0] = format!("{tag} {}", parts[0]);
         }
 
         lines.push(format!(
             "Dialogue: 0,{},{},Default,,0,0,0,,{}",
             format_ass_timestamp(start_secs),
             format_ass_timestamp(end_secs),
-            dialogue_text
+            parts.join("\\N")
         ));
     }
 
