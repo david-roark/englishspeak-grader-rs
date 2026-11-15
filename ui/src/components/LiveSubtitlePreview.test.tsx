@@ -36,6 +36,8 @@ describe("LiveSubtitlePreview", () => {
     const onSeekPlayerTo = vi.fn();
     const onUpdateSegmentAt = vi.fn();
     const onCaptureSegmentTime = vi.fn();
+    const onNudgeSegmentTime = vi.fn();
+    const onExportSegmentClip = vi.fn();
     const onInsertSegmentAtCurrentTime = vi.fn(() => 1);
     const onSaveUpdatedMarkdown = vi.fn();
 
@@ -54,10 +56,15 @@ describe("LiveSubtitlePreview", () => {
         showSubGrammar={true}
         scriptDirty={true}
         exportBusy={false}
+        hasVideoSource={true}
+        ffmpegAvailable={true}
+        isTaskBusy={false}
         onSeekPlayerTo={onSeekPlayerTo}
         onUpdateSegmentAt={onUpdateSegmentAt}
         onAssignSegmentSpeaker={vi.fn()}
         onCaptureSegmentTime={onCaptureSegmentTime}
+        onNudgeSegmentTime={onNudgeSegmentTime}
+        onExportSegmentClip={onExportSegmentClip}
         onInsertSegmentAtCurrentTime={onInsertSegmentAtCurrentTime}
         onDeleteSegmentAt={vi.fn()}
         onSaveUpdatedMarkdown={onSaveUpdatedMarkdown}
@@ -82,6 +89,14 @@ describe("LiveSubtitlePreview", () => {
     const captureBtns = screen.getAllByRole("button", { name: "Lấy giờ" });
     fireEvent.click(captureBtns[0]);
     expect(onCaptureSegmentTime).toHaveBeenCalledWith(0, "start_time");
+
+    // Nudge start time (-0.2s) and export clip
+    const nudgeMinusBtns = screen.getAllByRole("button", { name: "-0.2s" });
+    fireEvent.click(nudgeMinusBtns[0]);
+    expect(onNudgeSegmentTime).toHaveBeenCalledWith(0, "start_time", -0.2);
+
+    fireEvent.click(screen.getByRole("button", { name: /Cắt clip/i }));
+    expect(onExportSegmentClip).toHaveBeenCalledWith(0);
 
     // Save button is accessible right in the inline editor
     fireEvent.click(screen.getByRole("button", { name: /Lưu \.md/i }));

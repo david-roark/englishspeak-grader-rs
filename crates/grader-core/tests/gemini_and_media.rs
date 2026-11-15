@@ -7,11 +7,13 @@ use grader_core::gemini::{
 };
 use grader_core::media::{
     build_compress_video_args, build_embed_subtitles_video_args_to,
-    build_embed_subtitles_video_args_with_fonts_to, build_extract_mp3_args,
-    build_extract_speech_mp3_args_to, build_mute_video_args_to, build_trim_media_args_to,
-    compress_video, embed_subtitles_video_with_fonts_to, escape_ffmpeg_filter_path, extract_mp3,
-    parse_duration_from_stderr, parse_video_dimensions_from_stderr, resolve_ffmpeg,
-    DEFAULT_MP3_PRESET, DEFAULT_VIDEO_PRESET,
+    build_embed_subtitles_video_args_with_fonts_to,
+    build_embed_subtitles_video_args_with_options_to, build_export_segment_clip_args_to,
+    build_extract_mp3_args, build_extract_speech_mp3_args_to, build_mute_video_args_to,
+    build_trim_media_args_to, compress_video, embed_subtitles_video_with_fonts_to,
+    escape_ffmpeg_filter_path, extract_mp3, parse_duration_from_stderr,
+    parse_video_dimensions_from_stderr, resolve_ffmpeg, VideoAdjustments, DEFAULT_MP3_PRESET,
+    DEFAULT_VIDEO_PRESET,
 };
 use grader_core::prompts::PromptProfile;
 use grader_core::rubrics::{get_builtin_rubric, AssignmentImage, Rubric};
@@ -793,4 +795,58 @@ async fn test_real_ffmpeg_embed_subtitles_with_special_chars_if_available() {
     .expect("burn-in subtitles with special characters in path should succeed");
     assert!(out.exists());
     assert!(std::fs::metadata(&out).unwrap().len() > 0);
+}
+
+#[test]
+fn test_video_adjustments_and_segment_clip_args() {
+    let default_adj = VideoAdjustments::default();
+    assert!(!default_adj.has_eq());
+    assert_eq!(default_adj.build_eq_filter(), None);
+
+    let adj = VideoAdjustments {
+        brightness: 0.12,
+        contrast: 1.15,
+        gamma: 1.25,
+        enhance_audio: true,
+    };
+    assert!(adj.has_eq());
+    assert_eq!(
+        adj.build_eq_filter().as_deref(),
+        Some("eq=brightness=0.120:contrast=1.150:gamma=1.250")
+    );
+
+    let embed_args = build_embed_subtitles_video_args_with_options_to(
+        Path::new("/tmp/in.mp4"),
+        Path::new("/tmp/sub.ass"),
+        true,
+        None,
+        adj,
+        Path::new("/tmp/out.mp4"),
+    );
+    assert!(embed_args.windows(2).any(|w| w[0] == "-vf"
+        && w[1] == "eq=brightness=0.120:contrast=1.150:gamma=1.250,ass=filename=/tmp/sub.ass"));
+    assert!(embed_args
+        .windows(2)
+        .any(|w| w[0] == "-af" && w[1] == "highpass=f=80,lowpass=f=8000,dynaudnorm"));
+
+    let clip_args = build_export_segment_clip_args_to(
+        Path::new("/tmp/in.mp4"),
+        12.5,
+        18.75,
+        Some(Path::new("/tmp/clip.ass")),
+        None,
+        adj,
+        Path::new("/tmp/clip_out.mp4"),
+    );
+    assert!(clip_args
+        .windows(2)
+        .any(|w| w[0] == "-ss" && w[1] == "12.500"));
+    assert!(clip_args
+        .windows(2)
+        .any(|w| w[0] == "-to" && w[1] == "18.750"));
+    assert!(clip_args.windows(2).any(|w| w[0] == "-vf"
+        && w[1] == "eq=brightness=0.120:contrast=1.150:gamma=1.250,ass=filename=/tmp/clip.ass"));
+    assert!(clip_args
+        .windows(2)
+        .any(|w| w[0] == "-af" && w[1] == "highpass=f=80,lowpass=f=8000,dynaudnorm"));
 }

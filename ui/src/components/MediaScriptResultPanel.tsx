@@ -9,6 +9,7 @@ import {
   Pencil,
   Play,
   Plus,
+  Scissors,
   Search,
   Trash2,
   Users,
@@ -58,12 +59,16 @@ interface MediaScriptResultPanelProps {
   setShowSubTranslation: (val: boolean) => void;
   showSubGrammar: boolean;
   setShowSubGrammar: (val: boolean) => void;
+  enhanceExportAudio: boolean;
+  setEnhanceExportAudio: (val: boolean) => void;
+  hasVideoAdjustments: boolean;
   subtitledVideoOutput: MediaOutput | null;
   onCopyScriptMarkdown: () => void;
   onSaveUpdatedMarkdown: () => void;
   onExportScriptAs: (format: "srt" | "txt") => void;
   onSpeakerChange: (speakerId: string, newLabel: string, newRole: string) => void;
   onEmbedSubtitlesVideo: () => void;
+  onExportSegmentClip: (idx: number) => void;
   onSeekPlayerTo: (rawTimestamp: string) => void;
   onInsertSegmentAfter: (idx: number | null) => void;
   onDeleteSegmentAt: (idx: number) => void;
@@ -101,12 +106,16 @@ export function MediaScriptResultPanel({
   setShowSubTranslation,
   showSubGrammar,
   setShowSubGrammar,
+  enhanceExportAudio,
+  setEnhanceExportAudio,
+  hasVideoAdjustments,
   subtitledVideoOutput,
   onCopyScriptMarkdown,
   onSaveUpdatedMarkdown,
   onExportScriptAs,
   onSpeakerChange,
   onEmbedSubtitlesVideo,
+  onExportSegmentClip,
   onSeekPlayerTo,
   onInsertSegmentAfter,
   onDeleteSegmentAt,
@@ -485,6 +494,24 @@ export function MediaScriptResultPanel({
                   </label>
                 ))}
               </div>
+              {burnMode === "hardsub" && (
+                <div className="mt-2 flex flex-wrap items-center gap-3 border-t border-slate-100 pt-2">
+                  <label className="flex cursor-pointer items-center gap-1.5 text-[11px] font-medium text-slate-700">
+                    <input
+                      type="checkbox"
+                      checked={enhanceExportAudio}
+                      onChange={(e) => setEnhanceExportAudio(e.target.checked)}
+                      className="rounded border-slate-300"
+                    />
+                    <span>Lọc tạp âm &amp; cân bằng giọng nói khi ghép phụ đề</span>
+                  </label>
+                  {hasVideoAdjustments && (
+                    <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-800">
+                      Đang áp dụng chỉnh sáng/tối từ Player
+                    </span>
+                  )}
+                </div>
+              )}
             </div>
 
             {scriptDirty && (
@@ -651,6 +678,18 @@ export function MediaScriptResultPanel({
                     >
                       <Plus className="h-3 w-3" />
                     </button>
+                    {hasVideoSource && (
+                      <button
+                        type="button"
+                        disabled={!ffmpegAvailable || isTaskBusy}
+                        onClick={() => onExportSegmentClip(originalIdx)}
+                        className="rounded-md border border-slate-200 bg-white p-1 text-slate-500 hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700 disabled:cursor-not-allowed disabled:opacity-40"
+                        title="Cắt riêng clip video cho câu thoại này"
+                        aria-label="Cắt clip câu thoại"
+                      >
+                        <Scissors className="h-3 w-3" />
+                      </button>
+                    )}
                     <button
                       type="button"
                       onClick={() => onDeleteSegmentAt(originalIdx)}

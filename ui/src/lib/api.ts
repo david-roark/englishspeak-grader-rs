@@ -220,9 +220,36 @@ export const api = {
     show_text?: boolean;
     show_translation?: boolean;
     show_grammar?: boolean;
+    brightness?: number;
+    contrast?: number;
+    gamma?: number;
+    enhance_audio?: boolean;
     out_dir_override?: string;
     out_path_override?: string;
   }) => invoke<MediaOutput>("embed_subtitles_video_cmd", { req }),
+
+  exportSegmentClip: (req: {
+    task_id: string;
+    video_path: string;
+    start_secs: number;
+    end_secs: number;
+    clip_tag: string;
+    burn_subtitles?: boolean;
+    transcript?: TranscriptResult;
+    content_mode?: "all" | "with_grammar" | "bilingual" | "text_only";
+    font_name?: string;
+    show_role?: boolean;
+    show_speaker?: boolean;
+    show_text?: boolean;
+    show_translation?: boolean;
+    show_grammar?: boolean;
+    brightness?: number;
+    contrast?: number;
+    gamma?: number;
+    enhance_audio?: boolean;
+    out_dir_override?: string;
+    out_path_override?: string;
+  }) => invoke<MediaOutput>("export_segment_clip_cmd", { req }),
 
   listRubrics: () => invoke<Rubric[]>("list_rubrics"),
   saveCustomRubric: (rubric: Rubric) =>

@@ -7,6 +7,7 @@ import {
   Play,
   Plus,
   Save,
+  Scissors,
   Trash2,
 } from "lucide-react";
 import { formatDuration, parseTimecodeToSeconds } from "../lib/mediaUtils";
@@ -33,10 +34,19 @@ interface LiveSubtitlePreviewProps {
   showSubGrammar: boolean;
   scriptDirty: boolean;
   exportBusy: boolean;
+  hasVideoSource?: boolean;
+  ffmpegAvailable?: boolean;
+  isTaskBusy?: boolean;
   onSeekPlayerTo: (rawTimestamp: string) => void;
   onUpdateSegmentAt: (idx: number, patch: Partial<TranscriptSegment>) => void;
   onAssignSegmentSpeaker: (idx: number, speakerId: string) => void;
   onCaptureSegmentTime: (idx: number, field: "start_time" | "end_time") => void;
+  onNudgeSegmentTime?: (
+    idx: number,
+    field: "start_time" | "end_time",
+    deltaSecs: number
+  ) => void;
+  onExportSegmentClip?: (idx: number) => void;
   onInsertSegmentAtCurrentTime: () => number | null;
   onDeleteSegmentAt: (idx: number) => void;
   onSaveUpdatedMarkdown: () => void;
@@ -56,10 +66,15 @@ export function LiveSubtitlePreview({
   showSubGrammar,
   scriptDirty,
   exportBusy,
+  hasVideoSource = false,
+  ffmpegAvailable = false,
+  isTaskBusy = false,
   onSeekPlayerTo,
   onUpdateSegmentAt,
   onAssignSegmentSpeaker,
   onCaptureSegmentTime,
+  onNudgeSegmentTime,
+  onExportSegmentClip,
   onInsertSegmentAtCurrentTime,
   onDeleteSegmentAt,
   onSaveUpdatedMarkdown,
@@ -300,6 +315,18 @@ export function LiveSubtitlePreview({
                 <Play className="h-2.5 w-2.5 fill-current" />
                 Phát câu
               </button>
+              {onExportSegmentClip && hasVideoSource && (
+                <button
+                  type="button"
+                  disabled={!ffmpegAvailable || isTaskBusy}
+                  onClick={() => onExportSegmentClip(editIdx)}
+                  className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-semibold text-slate-700 hover:border-indigo-300 hover:bg-indigo-50 hover:text-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
+                  title="Cắt riêng đoạn video của câu này (kèm phụ đề & chỉnh sáng)"
+                >
+                  <Scissors className="h-2.5 w-2.5" />
+                  Cắt clip
+                </button>
+              )}
               <button
                 type="button"
                 onClick={handleDeleteCurrent}
@@ -371,6 +398,26 @@ export function LiveSubtitlePreview({
                 }
                 className="mt-0.5 w-full rounded-md border border-slate-200 px-2 py-1 font-mono text-xs focus:border-indigo-400 focus:outline-none"
               />
+              {onNudgeSegmentTime && (
+                <div className="mt-1 flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => onNudgeSegmentTime(editIdx, "start_time", -0.2)}
+                    className="flex-1 rounded border border-slate-200 bg-slate-50 py-0.5 font-mono text-[10px] font-semibold text-slate-600 hover:bg-indigo-50 hover:text-indigo-700"
+                    title="Lùi thời gian bắt đầu 0.2 giây"
+                  >
+                    -0.2s
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onNudgeSegmentTime(editIdx, "start_time", 0.2)}
+                    className="flex-1 rounded border border-slate-200 bg-slate-50 py-0.5 font-mono text-[10px] font-semibold text-slate-600 hover:bg-indigo-50 hover:text-indigo-700"
+                    title="Tăng thời gian bắt đầu 0.2 giây"
+                  >
+                    +0.2s
+                  </button>
+                </div>
+              )}
             </div>
 
             <div>
@@ -394,6 +441,26 @@ export function LiveSubtitlePreview({
                 }
                 className="mt-0.5 w-full rounded-md border border-slate-200 px-2 py-1 font-mono text-xs focus:border-indigo-400 focus:outline-none"
               />
+              {onNudgeSegmentTime && (
+                <div className="mt-1 flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => onNudgeSegmentTime(editIdx, "end_time", -0.2)}
+                    className="flex-1 rounded border border-slate-200 bg-slate-50 py-0.5 font-mono text-[10px] font-semibold text-slate-600 hover:bg-indigo-50 hover:text-indigo-700"
+                    title="Lùi thời gian kết thúc 0.2 giây"
+                  >
+                    -0.2s
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onNudgeSegmentTime(editIdx, "end_time", 0.2)}
+                    className="flex-1 rounded border border-slate-200 bg-slate-50 py-0.5 font-mono text-[10px] font-semibold text-slate-600 hover:bg-indigo-50 hover:text-indigo-700"
+                    title="Tăng thời gian kết thúc 0.2 giây"
+                  >
+                    +0.2s
+                  </button>
+                </div>
+              )}
             </div>
           </div>
 

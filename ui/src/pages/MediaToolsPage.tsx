@@ -6,8 +6,11 @@ import {
   FolderOpen,
   Minimize2,
   Music,
+  Repeat,
+  RotateCcw,
   Scissors,
   Sparkles,
+  Sun,
   VolumeX,
 } from "lucide-react";
 import { LiveSubtitlePreview } from "../components/LiveSubtitlePreview";
@@ -174,6 +177,22 @@ export function MediaToolsPage({
   const [subtitledVideoOutput, setSubtitledVideoOutput] =
     useState<MediaOutput | null>(null);
   const [sessionHistory, setSessionHistory] = useState<SessionHistoryItem[]>([]);
+  const [playbackRate, setPlaybackRate] = useState<number>(1);
+  const [loopActiveSegment, setLoopActiveSegment] = useState(false);
+  const [showVideoAdjustPanel, setShowVideoAdjustPanel] = useState(false);
+  const [videoBrightness, setVideoBrightness] = useState(0);
+  const [videoContrast, setVideoContrast] = useState(1);
+  const [videoGamma, setVideoGamma] = useState(1);
+  const [enhanceExportAudio, setEnhanceExportAudio] = useState(false);
+
+  const hasVideoAdjustments =
+    Math.abs(videoBrightness) > 0.005 ||
+    Math.abs(videoContrast - 1) > 0.005 ||
+    Math.abs(videoGamma - 1) > 0.005;
+
+  const videoFilterStyle = hasVideoAdjustments
+    ? `brightness(${(1 + videoBrightness * 1.4 + (videoGamma - 1) * 0.25).toFixed(2)}) contrast(${videoContrast.toFixed(2)})`
+    : undefined;
 
   const isSourceAudio = sourceFile ? isAudioFilePath(sourceFile.path) : false;
   const isSourceMp3 = sourceFile
@@ -408,6 +427,19 @@ export function MediaToolsPage({
     updateSegmentAt(idx, { [field]: formatEditableTimecode(current) });
   }
 
+  function nudgeSegmentTime(
+    idx: number,
+    field: "start_time" | "end_time",
+    deltaSecs: number
+  ) {
+    if (!scriptResult) return;
+    const seg = scriptResult.transcript.segments[idx];
+    if (!seg) return;
+    const base = parseTimecodeToSeconds(seg[field]) ?? playerCurrentTime;
+    const next = Math.max(0, base + deltaSecs);
+    updateSegmentAt(idx, { [field]: formatEditableTimecode(next) });
+  }
+
   function insertSegmentAfter(idx: number | null) {
     if (!scriptResult) return;
     const defaultSpeaker = scriptResult.transcript.speakers[0] ?? {
@@ -561,6 +593,10 @@ export function MediaToolsPage({
         show_text: showSubText,
         show_translation: showSubTranslation,
         show_grammar: showSubGrammar,
+        brightness: videoBrightness,
+        contrast: videoContrast,
+        gamma: videoGamma,
+        enhance_audio: enhanceExportAudio,
         out_dir_override: overrides.outDirOverride,
         out_path_override: mp4PathOverride,
       });
@@ -572,6 +608,77 @@ export function MediaToolsPage({
             burnMode === "hardsub"
               ? "Video + Script (In cứng)"
               : "Video + Script (Phụ đề mềm)",
+          output: out,
+        },
+        ...prev.slice(0, 7),
+      ]);
+    } catch (e) {
+      setErrMsg(String(e));
+    } finally {
+      unlisten();
+      setTaskId(null);
+    }
+  }
+
+  async function handleExportSegmentClip(idx: number) {
+    if (!sourceFile || !scriptResult || isSourceAudio || !ffmpegAvailable) return;
+    const seg = scriptResult.transcript.segments[idx];
+    if (!seg) return;
+    const rawStart = parseTimecodeToSeconds(seg.start_time);
+    const rawEnd = parseTimecodeToSeconds(seg.end_time);
+    if (rawStart === null || rawEnd === null || rawEnd <= rawStart) {
+      setErrMsg("Mốc thời gian bắt đầu/kết thúc của câu này chưa hợp lệ.");
+      return;
+    }
+    const startSecs = Math.max(0, rawStart - 0.3);
+    const endSecs = rawEnd + 0.4;
+
+    setErrMsg("");
+    const overrides = resolveOutputOverrides(outputTarget, sourceFile.path);
+    const id = `media_studio_clip_${Date.now()}`;
+    setTaskId(id);
+    setStage(`Đang cắt clip câu #${idx + 1}...`);
+    setPercent(0);
+
+    const unlisten = await api.listenProgress(id, (p) => {
+      setStage(p.stage);
+      setPercent(p.percent);
+    });
+
+    try {
+      const clipTranscript = {
+        ...scriptResult.transcript,
+        segments: [seg],
+      };
+      const out = await api.exportSegmentClip({
+        task_id: id,
+        video_path: sourceFile.path,
+        start_secs: startSecs,
+        end_secs: endSecs,
+        clip_tag: `clip_cau_${idx + 1}`,
+        burn_subtitles: burnMode === "hardsub",
+        transcript: clipTranscript,
+        content_mode: "all",
+        font_name: subtitleFont,
+        show_role: showSubRole,
+        show_speaker: showSubSpeaker,
+        show_text: showSubText,
+        show_translation: showSubTranslation,
+        show_grammar: showSubGrammar,
+        brightness: videoBrightness,
+        contrast: videoContrast,
+        gamma: videoGamma,
+        enhance_audio: enhanceExportAudio,
+        out_dir_override: overrides.outDirOverride,
+      });
+      setLatestResult({
+        toolLabel: `Clip câu #${idx + 1}`,
+        output: out,
+      });
+      setSessionHistory((prev) => [
+        {
+          id,
+          toolLabel: `Clip câu #${idx + 1}`,
           output: out,
         },
         ...prev.slice(0, 7),
@@ -865,13 +972,189 @@ export function MediaToolsPage({
             />
 
             {sourceFile && (
-              <LocalMediaPlayer
-                ref={playerRef}
-                path={sourceFile.path}
-                kind={isSourceAudio ? "audio" : "video"}
-                onTimeUpdate={(secs) => setPlayerCurrentTime(secs)}
-                className={isSourceAudio ? "w-full" : undefined}
-              />
+              <>
+                <LocalMediaPlayer
+                  ref={playerRef}
+                  path={sourceFile.path}
+                  kind={isSourceAudio ? "audio" : "video"}
+                  playbackRate={playbackRate}
+                  videoFilterStyle={videoFilterStyle}
+                  onTimeUpdate={(secs) => {
+                    setPlayerCurrentTime(secs);
+                    if (loopActiveSegment && activePreviewSegment) {
+                      const s = parseTimecodeToSeconds(
+                        activePreviewSegment.start_time
+                      );
+                      const e = parseTimecodeToSeconds(
+                        activePreviewSegment.end_time
+                      );
+                      if (
+                        s !== null &&
+                        e !== null &&
+                        e > s &&
+                        secs >= e - 0.05 &&
+                        playerRef.current &&
+                        !playerRef.current.paused
+                      ) {
+                        playerRef.current.currentTime = s;
+                      }
+                    }
+                  }}
+                  className={isSourceAudio ? "w-full" : undefined}
+                />
+
+                {/* Compact playback speed, loop & brightness controls */}
+                <div className="space-y-2 rounded-lg border border-slate-200 bg-slate-50/80 px-2.5 py-2">
+                  <div className="flex flex-wrap items-center justify-between gap-1.5">
+                    <div className="flex items-center gap-1">
+                      <span className="text-[10px] font-semibold text-slate-500">
+                        Tốc độ:
+                      </span>
+                      {[0.75, 1, 1.25, 1.5].map((rate) => (
+                        <button
+                          key={rate}
+                          type="button"
+                          onClick={() => setPlaybackRate(rate)}
+                          className={`rounded px-1.5 py-0.5 text-[10px] font-bold transition ${
+                            playbackRate === rate
+                              ? "bg-indigo-600 text-white"
+                              : "bg-white text-slate-600 hover:bg-indigo-50 hover:text-indigo-700"
+                          }`}
+                        >
+                          {rate}x
+                        </button>
+                      ))}
+                    </div>
+
+                    <div className="flex items-center gap-1">
+                      {scriptResult && (
+                        <button
+                          type="button"
+                          onClick={() => setLoopActiveSegment((v) => !v)}
+                          className={`inline-flex items-center gap-1 rounded px-2 py-0.5 text-[10px] font-semibold transition ${
+                            loopActiveSegment
+                              ? "bg-indigo-600 text-white"
+                              : "border border-slate-200 bg-white text-slate-600 hover:bg-indigo-50 hover:text-indigo-700"
+                          }`}
+                          title="Lặp lại câu phụ đề đang phát để nghe kỹ"
+                        >
+                          <Repeat className="h-2.5 w-2.5" />
+                          Loop câu
+                        </button>
+                      )}
+                      {!isSourceAudio && (
+                        <button
+                          type="button"
+                          onClick={() => setShowVideoAdjustPanel((v) => !v)}
+                          className={`inline-flex items-center gap-1 rounded px-2 py-0.5 text-[10px] font-semibold transition ${
+                            showVideoAdjustPanel || hasVideoAdjustments
+                              ? "border border-amber-300 bg-amber-50 text-amber-800"
+                              : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-100"
+                          }`}
+                          title="Chỉnh độ sáng, tương phản, chống ngược sáng"
+                        >
+                          <Sun className="h-2.5 w-2.5" />
+                          Ánh sáng
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {!isSourceAudio && showVideoAdjustPanel && (
+                    <div className="space-y-2 border-t border-slate-200 pt-2">
+                      <div className="flex flex-wrap items-center justify-between gap-1">
+                        <div className="flex flex-wrap gap-1">
+                          {[
+                            { label: "Mặc định", b: 0, c: 1, g: 1 },
+                            { label: "Sáng nhẹ", b: 0.08, c: 1.05, g: 1.1 },
+                            { label: "Ngược sáng", b: 0.1, c: 1.08, g: 1.35 },
+                            { label: "Tối nhẹ", b: -0.08, c: 1.05, g: 0.92 },
+                          ].map((preset) => (
+                            <button
+                              key={preset.label}
+                              type="button"
+                              onClick={() => {
+                                setVideoBrightness(preset.b);
+                                setVideoContrast(preset.c);
+                                setVideoGamma(preset.g);
+                              }}
+                              className="rounded border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-semibold text-slate-700 hover:border-amber-300 hover:bg-amber-50"
+                            >
+                              {preset.label}
+                            </button>
+                          ))}
+                        </div>
+                        {hasVideoAdjustments && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setVideoBrightness(0);
+                              setVideoContrast(1);
+                              setVideoGamma(1);
+                            }}
+                            className="inline-flex items-center gap-0.5 text-[10px] font-semibold text-slate-500 hover:text-slate-800"
+                          >
+                            <RotateCcw className="h-2.5 w-2.5" />
+                            Đặt lại
+                          </button>
+                        )}
+                      </div>
+
+                      <div className="grid gap-1.5 text-[10px]">
+                        <label className="flex items-center gap-2">
+                          <span className="w-24 shrink-0 font-semibold text-slate-600">
+                            Độ sáng ({videoBrightness >= 0 ? "+" : ""}
+                            {Math.round(videoBrightness * 100)}%)
+                          </span>
+                          <input
+                            type="range"
+                            min={-0.3}
+                            max={0.3}
+                            step={0.02}
+                            value={videoBrightness}
+                            onChange={(e) =>
+                              setVideoBrightness(Number(e.target.value))
+                            }
+                            className="w-full accent-amber-600"
+                          />
+                        </label>
+                        <label className="flex items-center gap-2">
+                          <span className="w-24 shrink-0 font-semibold text-slate-600">
+                            Tương phản ({videoContrast.toFixed(2)}x)
+                          </span>
+                          <input
+                            type="range"
+                            min={0.7}
+                            max={1.5}
+                            step={0.05}
+                            value={videoContrast}
+                            onChange={(e) =>
+                              setVideoContrast(Number(e.target.value))
+                            }
+                            className="w-full accent-amber-600"
+                          />
+                        </label>
+                        <label className="flex items-center gap-2">
+                          <span className="w-24 shrink-0 font-semibold text-slate-600">
+                            Ngược sáng ({videoGamma.toFixed(2)})
+                          </span>
+                          <input
+                            type="range"
+                            min={0.7}
+                            max={1.8}
+                            step={0.05}
+                            value={videoGamma}
+                            onChange={(e) =>
+                              setVideoGamma(Number(e.target.value))
+                            }
+                            className="w-full accent-amber-600"
+                          />
+                        </label>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </>
             )}
 
             {scriptResult && (
@@ -889,10 +1172,15 @@ export function MediaToolsPage({
                 showSubGrammar={showSubGrammar}
                 scriptDirty={scriptDirty}
                 exportBusy={exportBusy}
+                hasVideoSource={!isSourceAudio && Boolean(sourceFile)}
+                ffmpegAvailable={ffmpegAvailable}
+                isTaskBusy={taskId !== null}
                 onSeekPlayerTo={seekPlayerTo}
                 onUpdateSegmentAt={updateSegmentAt}
                 onAssignSegmentSpeaker={assignSegmentSpeaker}
                 onCaptureSegmentTime={captureSegmentTime}
+                onNudgeSegmentTime={nudgeSegmentTime}
+                onExportSegmentClip={(idx) => void handleExportSegmentClip(idx)}
                 onInsertSegmentAtCurrentTime={insertSegmentAtCurrentTime}
                 onDeleteSegmentAt={deleteSegmentAt}
                 onSaveUpdatedMarkdown={() => void handleSaveUpdatedMarkdown()}
@@ -1279,12 +1567,16 @@ export function MediaToolsPage({
               setShowSubTranslation={setShowSubTranslation}
               showSubGrammar={showSubGrammar}
               setShowSubGrammar={setShowSubGrammar}
+              enhanceExportAudio={enhanceExportAudio}
+              setEnhanceExportAudio={setEnhanceExportAudio}
+              hasVideoAdjustments={hasVideoAdjustments}
               subtitledVideoOutput={subtitledVideoOutput}
               onCopyScriptMarkdown={() => void handleCopyScriptMarkdown()}
               onSaveUpdatedMarkdown={() => void handleSaveUpdatedMarkdown()}
               onExportScriptAs={(fmt) => void handleExportScriptAs(fmt)}
               onSpeakerChange={handleSpeakerChange}
               onEmbedSubtitlesVideo={() => void handleEmbedSubtitlesVideo()}
+              onExportSegmentClip={(idx) => void handleExportSegmentClip(idx)}
               onSeekPlayerTo={seekPlayerTo}
               onInsertSegmentAfter={insertSegmentAfter}
               onDeleteSegmentAt={deleteSegmentAt}

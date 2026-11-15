@@ -477,12 +477,84 @@ pub fn build_embed_subtitles_video_args_to(
     )
 }
 
+/// Tùy chọn tinh chỉnh hình ảnh & âm thanh khi xuất video với `ffmpeg`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct VideoAdjustments {
+    /// Độ sáng (`-1.0` đến `1.0`, mặc định `0.0`).
+    pub brightness: f32,
+    /// Độ tương phản (`0.1` đến `3.0`, mặc định `1.0`).
+    pub contrast: f32,
+    /// Chỉnh vùng tối/ngược sáng (`0.1` đến `3.0`, mặc định `1.0`).
+    pub gamma: f32,
+    /// Lọc tạp âm & cân bằng âm lượng giọng nói (`highpass/lowpass/dynaudnorm`).
+    pub enhance_audio: bool,
+}
+
+impl Default for VideoAdjustments {
+    fn default() -> Self {
+        Self {
+            brightness: 0.0,
+            contrast: 1.0,
+            gamma: 1.0,
+            enhance_audio: false,
+        }
+    }
+}
+
+impl VideoAdjustments {
+    pub fn has_eq(&self) -> bool {
+        self.brightness.abs() > 1e-3
+            || (self.contrast - 1.0).abs() > 1e-3
+            || (self.gamma - 1.0).abs() > 1e-3
+    }
+
+    pub fn build_eq_filter(&self) -> Option<String> {
+        if !self.has_eq() {
+            return None;
+        }
+        let b = self.brightness.clamp(-1.0, 1.0);
+        let c = self.contrast.clamp(0.1, 3.0);
+        let g = self.gamma.clamp(0.1, 3.0);
+        Some(format!("eq=brightness={b:.3}:contrast={c:.3}:gamma={g:.3}"))
+    }
+}
+
 /// Dựng tham số CLI `ffmpeg` cho ghép phụ đề/script vào video kèm thư mục font (`fontsdir`) cho `libass`.
 pub fn build_embed_subtitles_video_args_with_fonts_to(
     video_path: &Path,
     subtitle_path: &Path,
     burn_in: bool,
     fonts_dir: Option<&Path>,
+    out_path: &Path,
+) -> Vec<String> {
+    build_embed_subtitles_video_args_with_options_to(
+        video_path,
+        subtitle_path,
+        burn_in,
+        fonts_dir,
+        VideoAdjustments::default(),
+        out_path,
+    )
+}
+
+fn build_ass_filter(subtitle_path: &Path, fonts_dir: Option<&Path>) -> String {
+    let escaped_sub = escape_ffmpeg_filter_path(subtitle_path);
+    match fonts_dir {
+        Some(dir) if !dir.as_os_str().is_empty() => {
+            let escaped_dir = escape_ffmpeg_filter_path(dir);
+            format!("ass=filename={escaped_sub}:fontsdir={escaped_dir}")
+        }
+        _ => format!("ass=filename={escaped_sub}"),
+    }
+}
+
+/// Dựng tham số CLI `ffmpeg` cho ghép phụ đề/script vào video kèm `fontsdir` và tinh chỉnh sáng/tối, âm thanh.
+pub fn build_embed_subtitles_video_args_with_options_to(
+    video_path: &Path,
+    subtitle_path: &Path,
+    burn_in: bool,
+    fonts_dir: Option<&Path>,
+    adjustments: VideoAdjustments,
     out_path: &Path,
 ) -> Vec<String> {
     let mut args = vec![
@@ -492,13 +564,10 @@ pub fn build_embed_subtitles_video_args_with_fonts_to(
     ];
 
     if burn_in {
-        let escaped_sub = escape_ffmpeg_filter_path(subtitle_path);
-        let filter = match fonts_dir {
-            Some(dir) if !dir.as_os_str().is_empty() => {
-                let escaped_dir = escape_ffmpeg_filter_path(dir);
-                format!("ass=filename={escaped_sub}:fontsdir={escaped_dir}")
-            }
-            _ => format!("ass=filename={escaped_sub}"),
+        let ass_filter = build_ass_filter(subtitle_path, fonts_dir);
+        let filter = match adjustments.build_eq_filter() {
+            Some(eq) => format!("{eq},{ass_filter}"),
+            None => ass_filter,
         };
         args.extend([
             "-vf".into(),
@@ -511,11 +580,14 @@ pub fn build_embed_subtitles_video_args_with_fonts_to(
             "fast".into(),
             "-crf".into(),
             "23".into(),
-            "-c:a".into(),
-            "aac".into(),
-            "-b:a".into(),
-            "128k".into(),
         ]);
+        if adjustments.enhance_audio {
+            args.extend([
+                "-af".into(),
+                "highpass=f=80,lowpass=f=8000,dynaudnorm".into(),
+            ]);
+        }
+        args.extend(["-c:a".into(), "aac".into(), "-b:a".into(), "128k".into()]);
     } else {
         args.extend(["-i".into(), subtitle_path.to_string_lossy().into_owned()]);
         if is_mp4_family(video_path) {
@@ -991,6 +1063,38 @@ pub async fn embed_subtitles_video_with_fonts_to<F>(
 where
     F: FnMut(MediaProgress) + Send,
 {
+    embed_subtitles_video_with_options_to(
+        ffmpeg_exe,
+        video_path,
+        subtitle_path,
+        burn_in,
+        fonts_dir,
+        VideoAdjustments::default(),
+        default_out_dir,
+        out_path_override,
+        on_progress,
+        cancel,
+    )
+    .await
+}
+
+/// Ghép phụ đề/script vào video kèm `fontsdir` và tinh chỉnh sáng/tối, âm thanh.
+#[allow(clippy::too_many_arguments)]
+pub async fn embed_subtitles_video_with_options_to<F>(
+    ffmpeg_exe: &Path,
+    video_path: &Path,
+    subtitle_path: &Path,
+    burn_in: bool,
+    fonts_dir: Option<&Path>,
+    adjustments: VideoAdjustments,
+    default_out_dir: &Path,
+    out_path_override: Option<&Path>,
+    on_progress: F,
+    cancel: Option<&CancellationToken>,
+) -> Result<PathBuf>
+where
+    F: FnMut(MediaProgress) + Send,
+{
     ensure_input_exists(video_path, false)?;
     if !subtitle_path.exists() {
         return Err(GraderError::Video(format!(
@@ -1006,11 +1110,12 @@ where
     };
     let out_path = resolve_target_path(default_out_dir, default_name, out_path_override);
     let duration_secs = probe_duration_secs(ffmpeg_exe, video_path).await;
-    let args = build_embed_subtitles_video_args_with_fonts_to(
+    let args = build_embed_subtitles_video_args_with_options_to(
         video_path,
         subtitle_path,
         burn_in,
         fonts_dir,
+        adjustments,
         &out_path,
     );
     let running_stage = if burn_in {
@@ -1027,6 +1132,142 @@ where
         running_stage,
         "Ghép script vào video hoàn tất.",
         "Ghép script vào video thất bại",
+        false,
+        on_progress,
+        cancel,
+    )
+    .await
+}
+
+/// Dựng tham số CLI `ffmpeg` để cắt 1 clip ngắn theo mốc `start_secs..end_secs` (tùy chọn đốt phụ đề & chỉnh sáng/âm thanh).
+pub fn build_export_segment_clip_args_to(
+    video_path: &Path,
+    start_secs: f64,
+    end_secs: f64,
+    subtitle_path: Option<&Path>,
+    fonts_dir: Option<&Path>,
+    adjustments: VideoAdjustments,
+    out_path: &Path,
+) -> Vec<String> {
+    let start = start_secs.max(0.0);
+    let end = end_secs.max(start + 0.1);
+
+    let mut args = vec![
+        "-y".into(),
+        "-i".into(),
+        video_path.to_string_lossy().into_owned(),
+        "-ss".into(),
+        format!("{start:.3}"),
+        "-to".into(),
+        format!("{end:.3}"),
+    ];
+
+    let mut vf_parts: Vec<String> = Vec::new();
+    if let Some(eq) = adjustments.build_eq_filter() {
+        vf_parts.push(eq);
+    }
+    if let Some(sub_path) = subtitle_path {
+        vf_parts.push(build_ass_filter(sub_path, fonts_dir));
+    }
+    if !vf_parts.is_empty() {
+        args.extend(["-vf".into(), vf_parts.join(",")]);
+    }
+
+    args.extend([
+        "-c:v".into(),
+        "libx264".into(),
+        "-pix_fmt".into(),
+        "yuv420p".into(),
+        "-preset".into(),
+        "fast".into(),
+        "-crf".into(),
+        "23".into(),
+    ]);
+    if adjustments.enhance_audio {
+        args.extend([
+            "-af".into(),
+            "highpass=f=80,lowpass=f=8000,dynaudnorm".into(),
+        ]);
+    }
+    args.extend([
+        "-c:a".into(),
+        "aac".into(),
+        "-b:a".into(),
+        "128k".into(),
+        "-map_metadata".into(),
+        "-1".into(),
+        "-metadata".into(),
+        "title= ".into(),
+        "-movflags".into(),
+        "+faststart".into(),
+        "-progress".into(),
+        "pipe:1".into(),
+        "-nostats".into(),
+        out_path.to_string_lossy().into_owned(),
+    ]);
+    args
+}
+
+/// Cắt một clip ngắn từ video theo câu thoại (có thể kèm đốt phụ đề, chỉnh sáng/tối và lọc giọng nói).
+#[allow(clippy::too_many_arguments)]
+pub async fn export_segment_clip_to<F>(
+    ffmpeg_exe: &Path,
+    video_path: &Path,
+    start_secs: f64,
+    end_secs: f64,
+    clip_tag: &str,
+    subtitle_path: Option<&Path>,
+    fonts_dir: Option<&Path>,
+    adjustments: VideoAdjustments,
+    default_out_dir: &Path,
+    out_path_override: Option<&Path>,
+    on_progress: F,
+    cancel: Option<&CancellationToken>,
+) -> Result<PathBuf>
+where
+    F: FnMut(MediaProgress) + Send,
+{
+    ensure_input_exists(video_path, false)?;
+    if let Some(sub) = subtitle_path {
+        if !sub.exists() {
+            return Err(GraderError::Video(format!(
+                "Không tìm thấy file phụ đề tạm: {}",
+                sub.display()
+            )));
+        }
+    }
+    if end_secs <= start_secs {
+        return Err(GraderError::InvalidInput(
+            "Thời điểm kết thúc clip phải lớn hơn thời điểm bắt đầu.".into(),
+        ));
+    }
+    let (stem, _) = file_stem_and_ext(video_path, "video", "mp4");
+    let safe_tag = if clip_tag.trim().is_empty() {
+        "clip"
+    } else {
+        clip_tag.trim()
+    };
+    let default_name = format!("{stem}_{safe_tag}.mp4");
+    let out_path = resolve_target_path(default_out_dir, default_name, out_path_override);
+    let clip_duration = (end_secs - start_secs).max(0.1);
+    let args = build_export_segment_clip_args_to(
+        video_path,
+        start_secs,
+        end_secs,
+        subtitle_path,
+        fonts_dir,
+        adjustments,
+        &out_path,
+    );
+
+    execute_ffmpeg_media_job(
+        ffmpeg_exe,
+        out_path,
+        args,
+        Some(clip_duration),
+        "Đang cắt clip câu thoại...",
+        "Xuất clip câu thoại hoàn tất.",
+        "Xuất clip câu thoại thất bại",
         false,
         on_progress,
         cancel,

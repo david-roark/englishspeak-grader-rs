@@ -2,6 +2,7 @@ import {
   forwardRef,
   useCallback,
   useEffect,
+  useRef,
   useState,
   type ForwardedRef,
 } from "react";
@@ -12,6 +13,8 @@ interface LocalMediaPlayerProps {
   path: string;
   kind: "audio" | "video";
   className?: string;
+  playbackRate?: number;
+  videoFilterStyle?: string;
   onTimeUpdate?: (currentTimeSecs: number) => void;
 }
 
@@ -45,7 +48,10 @@ function describeMediaError(err: MediaError | null): string {
 export const LocalMediaPlayer = forwardRef<
   HTMLMediaElement,
   LocalMediaPlayerProps
->(function LocalMediaPlayer({ path, kind, className, onTimeUpdate }, ref) {
+>(function LocalMediaPlayer(
+  { path, kind, className, playbackRate = 1, videoFilterStyle, onTimeUpdate },
+  ref
+) {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
   const [retriedAuth, setRetriedAuth] = useState(false);
@@ -54,13 +60,25 @@ export const LocalMediaPlayer = forwardRef<
     path: string;
     src: string;
   } | null>(null);
+  const internalMediaRef = useRef<HTMLMediaElement | null>(null);
 
   const bindMediaRef = useCallback(
     (node: HTMLMediaElement | null) => {
+      internalMediaRef.current = node;
       assignMediaRef(ref, node);
+      if (node && Number.isFinite(playbackRate) && playbackRate > 0) {
+        node.playbackRate = playbackRate;
+      }
     },
-    [ref]
+    [ref, playbackRate]
   );
+
+  useEffect(() => {
+    const node = internalMediaRef.current;
+    if (node && Number.isFinite(playbackRate) && playbackRate > 0) {
+      node.playbackRate = playbackRate;
+    }
+  }, [playbackRate, path, reloadKey]);
 
   useEffect(() => {
     setErrorMsg(null);
@@ -180,6 +198,7 @@ export const LocalMediaPlayer = forwardRef<
             controls
             playsInline
             preload="auto"
+            style={videoFilterStyle ? { filter: videoFilterStyle } : undefined}
             onLoadedMetadata={(e) => {
               setErrorMsg(null);
               const v = e.currentTarget;

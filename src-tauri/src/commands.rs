@@ -3,14 +3,15 @@ use std::time::{Duration, Instant};
 
 use grader_core::export::{default_export_path, export_to_excel};
 use grader_core::{
-    build_prompt_parts, compress_video_to, embed_subtitles_video_with_fonts_to, extract_mp3_to,
-    extract_speech_mp3_to, fmt_num, format_result_markdown, format_transcript_ass_with_options,
-    format_transcript_markdown, format_transcript_srt_with_mode,
+    build_prompt_parts, compress_video_to, embed_subtitles_video_with_options_to,
+    export_segment_clip_to, extract_mp3_to, extract_speech_mp3_to, fmt_num, format_result_markdown,
+    format_transcript_ass_with_options, format_transcript_markdown, format_transcript_srt_with_mode,
     format_transcript_srt_with_options, format_transcript_text, mp3_presets, mute_video_to,
     probe_duration_secs, probe_video_dimensions, resolve_ffmpeg, trim_media_to, video_presets,
     AssSubtitleOptions, AssessmentDetail, AssessmentSummary, AssignmentImage, GeminiClient,
     GradingAssignment, MediaResolution, Mp3Preset, NewAssessment, PromptParts, PromptProfile,
-    Rubric, TranscribeOptions, TranscriptResult, VideoPreset, DEFAULT_MODEL, FALLBACK_MODELS,
+    Rubric, TranscribeOptions, TranscriptResult, VideoAdjustments, VideoPreset, DEFAULT_MODEL,
+    FALLBACK_MODELS,
 };
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State};
@@ -150,6 +151,51 @@ pub struct EmbedSubtitlesRequest {
     pub show_translation: Option<bool>,
     #[serde(default)]
     pub show_grammar: Option<bool>,
+    #[serde(default)]
+    pub brightness: Option<f32>,
+    #[serde(default)]
+    pub contrast: Option<f32>,
+    #[serde(default)]
+    pub gamma: Option<f32>,
+    #[serde(default)]
+    pub enhance_audio: Option<bool>,
+    pub out_dir_override: Option<String>,
+    pub out_path_override: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ExportSegmentClipRequest {
+    pub task_id: String,
+    pub video_path: String,
+    pub start_secs: f64,
+    pub end_secs: f64,
+    pub clip_tag: String,
+    #[serde(default)]
+    pub burn_subtitles: bool,
+    #[serde(default)]
+    pub transcript: Option<TranscriptResult>,
+    #[serde(default)]
+    pub content_mode: Option<String>,
+    #[serde(default)]
+    pub font_name: Option<String>,
+    #[serde(default)]
+    pub show_role: Option<bool>,
+    #[serde(default)]
+    pub show_speaker: Option<bool>,
+    #[serde(default)]
+    pub show_text: Option<bool>,
+    #[serde(default)]
+    pub show_translation: Option<bool>,
+    #[serde(default)]
+    pub show_grammar: Option<bool>,
+    #[serde(default)]
+    pub brightness: Option<f32>,
+    #[serde(default)]
+    pub contrast: Option<f32>,
+    #[serde(default)]
+    pub gamma: Option<f32>,
+    #[serde(default)]
+    pub enhance_audio: Option<bool>,
     pub out_dir_override: Option<String>,
     pub out_path_override: Option<String>,
 }
@@ -1099,6 +1145,52 @@ pub fn export_transcript_file(
     Ok(build_media_output(&state, target, 0.0, &fallback_name))
 }
 
+#[allow(clippy::too_many_arguments)]
+async fn build_ass_subtitle_options(
+    ffmpeg: &Path,
+    src: &Path,
+    burn_in: bool,
+    content_mode: String,
+    font_name: Option<&str>,
+    show_role: Option<bool>,
+    show_speaker: Option<bool>,
+    show_text: Option<bool>,
+    show_translation: Option<bool>,
+    show_grammar: Option<bool>,
+) -> AssSubtitleOptions {
+    let (play_res_x, play_res_y) = if burn_in {
+        match probe_video_dimensions(ffmpeg, src).await {
+            Some((w, h)) if w < h => (720, 1280),
+            _ => (1280, 720),
+        }
+    } else {
+        (1280, 720)
+    };
+    let resolved_font = font_name
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or("Be Vietnam Pro")
+        .to_string();
+    AssSubtitleOptions {
+        content_mode,
+        font_name: resolved_font,
+        play_res_x,
+        play_res_y,
+        show_role: show_role.unwrap_or(true),
+        show_speaker: show_speaker.unwrap_or(true),
+        show_text: show_text.unwrap_or(true),
+        show_translation,
+        show_grammar,
+    }
+}
+
+fn sanitize_task_id(task_id: &str) -> String {
+    task_id
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+        .collect()
+}
+
 #[tauri::command]
 pub async fn embed_subtitles_video_cmd(
     app: AppHandle,
@@ -1122,37 +1214,20 @@ pub async fn embed_subtitles_video_cmd(
         resolve_media_output_targets(&state, req.out_dir_override, req.out_path_override);
 
     let burn_in = !req.burn_mode.trim().eq_ignore_ascii_case("softsub");
-    let safe_id: String = req
-        .task_id
-        .chars()
-        .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
-        .collect();
-    let (play_res_x, play_res_y) = if burn_in {
-        match probe_video_dimensions(&ffmpeg, &src).await {
-            Some((w, h)) if w < h => (720, 1280),
-            _ => (1280, 720),
-        }
-    } else {
-        (1280, 720)
-    };
-    let font_name = req
-        .font_name
-        .as_deref()
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .unwrap_or("Be Vietnam Pro")
-        .to_string();
-    let options = AssSubtitleOptions {
-        content_mode: req.content_mode.clone(),
-        font_name,
-        play_res_x,
-        play_res_y,
-        show_role: req.show_role.unwrap_or(true),
-        show_speaker: req.show_speaker.unwrap_or(true),
-        show_text: req.show_text.unwrap_or(true),
-        show_translation: req.show_translation,
-        show_grammar: req.show_grammar,
-    };
+    let safe_id = sanitize_task_id(&req.task_id);
+    let options = build_ass_subtitle_options(
+        &ffmpeg,
+        &src,
+        burn_in,
+        req.content_mode.clone(),
+        req.font_name.as_deref(),
+        req.show_role,
+        req.show_speaker,
+        req.show_text,
+        req.show_translation,
+        req.show_grammar,
+    )
+    .await;
     let (sub_ext, sub_content) = if burn_in {
         (
             "ass",
@@ -1169,13 +1244,20 @@ pub async fn embed_subtitles_video_cmd(
         .map_err(|e| format!("Không ghi được file phụ đề tạm: {e}"))?;
 
     let fonts_dir = burn_in.then(|| state.resolve_fonts_dir()).flatten();
+    let adjustments = VideoAdjustments {
+        brightness: req.brightness.unwrap_or(0.0),
+        contrast: req.contrast.unwrap_or(1.0),
+        gamma: req.gamma.unwrap_or(1.0),
+        enhance_audio: req.enhance_audio.unwrap_or(false),
+    };
     let cancel = state.register_task(&req.task_id).await;
-    let res = embed_subtitles_video_with_fonts_to(
+    let res = embed_subtitles_video_with_options_to(
         &ffmpeg,
         &src,
         &temp_sub_path,
         burn_in,
         fonts_dir.as_deref(),
+        adjustments,
         &out_dir,
         out_file.as_deref(),
         |p| emit_progress(&app, &req.task_id, p.stage, p.percent),
@@ -1218,6 +1300,107 @@ pub async fn embed_subtitles_video_cmd(
         orig_size_mb,
         fallback_name,
     ))
+}
+
+#[tauri::command]
+pub async fn export_segment_clip_cmd(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    req: ExportSegmentClipRequest,
+) -> Result<MediaOutput, String> {
+    let ffmpeg = resolve_ffmpeg_for_state(&state)?;
+    let src = PathBuf::from(&req.video_path);
+    if !src.is_file() {
+        return Err("Chưa chọn file video gốc hợp lệ.".into());
+    }
+    state.media_server.authorize_path(&src);
+
+    let orig_size_mb = std::fs::metadata(&src)
+        .map(|m| m.len() as f64 / (1024.0 * 1024.0))
+        .unwrap_or(0.0);
+    let (out_dir, out_file) =
+        resolve_media_output_targets(&state, req.out_dir_override, req.out_path_override);
+
+    let mut temp_sub_path: Option<PathBuf> = None;
+    let mut fonts_dir: Option<PathBuf> = None;
+    if req.burn_subtitles {
+        if let Some(transcript) = req.transcript.as_ref() {
+            if !transcript.segments.is_empty() {
+                let safe_id = sanitize_task_id(&req.task_id);
+                let options = build_ass_subtitle_options(
+                    &ffmpeg,
+                    &src,
+                    true,
+                    req.content_mode.unwrap_or_else(|| "full".into()),
+                    req.font_name.as_deref(),
+                    req.show_role,
+                    req.show_speaker,
+                    req.show_text,
+                    req.show_translation,
+                    req.show_grammar,
+                )
+                .await;
+                let sub_content = format_transcript_ass_with_options(transcript, &options);
+                let sub_path =
+                    std::env::temp_dir().join(format!("englishspeak_clip_{safe_id}.ass"));
+                std::fs::write(&sub_path, sub_content)
+                    .map_err(|e| format!("Không ghi được file phụ đề tạm: {e}"))?;
+                temp_sub_path = Some(sub_path);
+                fonts_dir = state.resolve_fonts_dir();
+            }
+        }
+    }
+
+    let adjustments = VideoAdjustments {
+        brightness: req.brightness.unwrap_or(0.0),
+        contrast: req.contrast.unwrap_or(1.0),
+        gamma: req.gamma.unwrap_or(1.0),
+        enhance_audio: req.enhance_audio.unwrap_or(false),
+    };
+    let cancel = state.register_task(&req.task_id).await;
+    let res = export_segment_clip_to(
+        &ffmpeg,
+        &src,
+        req.start_secs,
+        req.end_secs,
+        &req.clip_tag,
+        temp_sub_path.as_deref(),
+        fonts_dir.as_deref(),
+        adjustments,
+        &out_dir,
+        out_file.as_deref(),
+        |p| emit_progress(&app, &req.task_id, p.stage, p.percent),
+        Some(&cancel),
+    )
+    .await;
+    state.finish_task(&req.task_id).await;
+    if let Some(sub) = temp_sub_path {
+        let _ = tokio::fs::remove_file(sub).await;
+    }
+
+    let out_path = match res {
+        Ok(p) => {
+            state.activity_log.info(
+                "media",
+                format!(
+                    "Xuất clip câu thoại thành công: {}",
+                    p.file_name()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or("clip.mp4")
+                ),
+            );
+            p
+        }
+        Err(e) => {
+            let msg = e.to_string();
+            state
+                .activity_log
+                .error("media", format!("Xuất clip câu thoại thất bại: {msg}"));
+            return Err(msg);
+        }
+    };
+
+    Ok(build_media_output(&state, out_path, orig_size_mb, "clip.mp4"))
 }
 
 #[tauri::command]
