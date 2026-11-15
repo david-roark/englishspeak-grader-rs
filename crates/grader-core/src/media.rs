@@ -1179,7 +1179,8 @@ where
     let (stem, ext) = file_stem_and_ext(input_path, "media", "mp4");
     let has_compress = options.compress_preset.is_some();
     let has_trim = options.trim.is_some();
-    let active_count = usize::from(has_compress) + usize::from(has_trim) + usize::from(options.mute);
+    let active_count =
+        usize::from(has_compress) + usize::from(has_trim) + usize::from(options.mute);
 
     let default_name = match (
         active_count,

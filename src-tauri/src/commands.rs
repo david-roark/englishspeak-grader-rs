@@ -5,13 +5,14 @@ use grader_core::export::{default_export_path, export_to_excel};
 use grader_core::{
     build_prompt_parts, compress_video_to, edit_video_to, embed_subtitles_video_with_options_to,
     export_segment_clip_to, extract_mp3_to, extract_speech_mp3_to, fmt_num, format_result_markdown,
-    format_transcript_ass_with_options, format_transcript_markdown, format_transcript_srt_with_mode,
-    format_transcript_srt_with_options, format_transcript_text, merge_videos_to, mp3_presets,
-    mute_video_to, probe_duration_secs, probe_video_dimensions, resolve_ffmpeg, trim_media_to,
-    video_presets, AssSubtitleOptions, AssessmentDetail, AssessmentSummary, AssignmentImage,
-    GeminiClient, GradingAssignment, MediaResolution, Mp3Preset, NewAssessment, PromptParts,
-    PromptProfile, Rubric, TranscribeOptions, TranscriptResult, TrimRange, VideoAdjustments,
-    VideoEditOptions, VideoPreset, DEFAULT_MODEL, FALLBACK_MODELS,
+    format_transcript_ass_with_options, format_transcript_markdown,
+    format_transcript_srt_with_mode, format_transcript_srt_with_options, format_transcript_text,
+    merge_videos_to, mp3_presets, mute_video_to, probe_duration_secs, probe_video_dimensions,
+    resolve_ffmpeg, trim_media_to, video_presets, AssSubtitleOptions, AssessmentDetail,
+    AssessmentSummary, AssignmentImage, GeminiClient, GradingAssignment, MediaResolution,
+    Mp3Preset, NewAssessment, PromptParts, PromptProfile, Rubric, TranscribeOptions,
+    TranscriptResult, TrimRange, VideoAdjustments, VideoEditOptions, VideoPreset, DEFAULT_MODEL,
+    FALLBACK_MODELS,
 };
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State};
@@ -1474,9 +1475,7 @@ pub async fn export_segment_clip_cmd(
                 "media",
                 format!(
                     "Xuất clip câu thoại thành công: {}",
-                    p.file_name()
-                        .and_then(|s| s.to_str())
-                        .unwrap_or("clip.mp4")
+                    p.file_name().and_then(|s| s.to_str()).unwrap_or("clip.mp4")
                 ),
             );
             p
@@ -1490,7 +1489,12 @@ pub async fn export_segment_clip_cmd(
         }
     };
 
-    Ok(build_media_output(&state, out_path, orig_size_mb, "clip.mp4"))
+    Ok(build_media_output(
+        &state,
+        out_path,
+        orig_size_mb,
+        "clip.mp4",
+    ))
 }
 
 #[tauri::command]

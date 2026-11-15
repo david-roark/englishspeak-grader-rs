@@ -854,8 +854,12 @@ fn test_video_adjustments_and_segment_clip_args() {
 
 #[tokio::test]
 async fn test_merge_videos_args_and_real_ffmpeg_if_available() {
-    assert!(parse_has_audio_from_stderr("  Stream #0:1: Audio: aac, 44100 Hz"));
-    assert!(!parse_has_audio_from_stderr("  Stream #0:0: Video: h264, 1280x720"));
+    assert!(parse_has_audio_from_stderr(
+        "  Stream #0:1: Audio: aac, 44100 Hz"
+    ));
+    assert!(!parse_has_audio_from_stderr(
+        "  Stream #0:0: Video: h264, 1280x720"
+    ));
 
     let inputs = vec![
         MergeVideoInput {
@@ -869,25 +873,24 @@ async fn test_merge_videos_args_and_real_ffmpeg_if_available() {
             duration_secs: Some(1.5),
         },
     ];
-    let fc_args = build_merge_videos_filter_complex_args_to(
-        &inputs,
-        1281,
-        720,
-        Path::new("/tmp/merged.mp4"),
-    );
+    let fc_args =
+        build_merge_videos_filter_complex_args_to(&inputs, 1281, 720, Path::new("/tmp/merged.mp4"));
     let fc_idx = fc_args
         .iter()
         .position(|a| a == "-filter_complex")
         .expect("-filter_complex missing");
     assert!(fc_args[fc_idx + 1].contains("scale=1280:720"));
-    assert!(fc_args[fc_idx + 1].contains("anullsrc=channel_layout=stereo:sample_rate=44100:d=1.500[a1]"));
+    assert!(fc_args[fc_idx + 1]
+        .contains("anullsrc=channel_layout=stereo:sample_rate=44100:d=1.500[a1]"));
     assert!(fc_args[fc_idx + 1].contains("concat=n=2:v=1:a=1[outv][outa]"));
 
     let fast_args = build_merge_videos_fast_concat_args_to(
         Path::new("/tmp/list.txt"),
         Path::new("/tmp/merged_fast.mp4"),
     );
-    assert!(fast_args.windows(2).any(|w| w[0] == "-f" && w[1] == "concat"));
+    assert!(fast_args
+        .windows(2)
+        .any(|w| w[0] == "-f" && w[1] == "concat"));
     assert!(fast_args.windows(2).any(|w| w[0] == "-c" && w[1] == "copy"));
 
     let Some(ffmpeg) = resolve_ffmpeg(None, None) else {
@@ -937,17 +940,9 @@ async fn test_merge_videos_args_and_real_ffmpeg_if_available() {
         return;
     }
 
-    let merged = merge_videos_to(
-        &ffmpeg,
-        &[v1, v2],
-        false,
-        dir.path(),
-        None,
-        |_| {},
-        None,
-    )
-    .await
-    .expect("merge videos of different resolution & audio should succeed");
+    let merged = merge_videos_to(&ffmpeg, &[v1, v2], false, dir.path(), None, |_| {}, None)
+        .await
+        .expect("merge videos of different resolution & audio should succeed");
     assert!(merged.exists());
     assert!(std::fs::metadata(&merged).unwrap().len() > 0);
 }
