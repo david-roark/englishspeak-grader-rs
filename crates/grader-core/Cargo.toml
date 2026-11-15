@@ -6,7 +6,7 @@ license-file.workspace = true
 description = "Core engine for EnglishSpeak Grader: rubrics, prompts, Gemini API client, normalized SQLite storage, Excel export, and FFmpeg media processing."
 
 [dependencies]
-chrono = { version = "0.4", features = ["serde"] }
+chrono = "0.4"
 directories = "6"
 regex = "1"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
@@ -18,7 +18,6 @@ serde_json = "1"
 thiserror = "2"
 tokio = { version = "1", features = ["fs", "io-util", "macros", "process", "rt-multi-thread", "sync", "time"] }
 tokio-util = { version = "0.7", features = ["io"] }
-tracing = "0.1"
 
 [dev-dependencies]
 calamine = "0.38"
