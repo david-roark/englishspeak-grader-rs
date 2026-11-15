@@ -14,6 +14,7 @@ import {
   Repeat,
   RotateCcw,
   Scissors,
+  SlidersHorizontal,
   Sparkles,
   Sun,
   Trash2,
@@ -57,7 +58,7 @@ import type {
   VideoPreset,
 } from "../lib/types";
 
-type MediaToolId = "compress" | "mp3" | "trim" | "mute" | "merge" | "script";
+type MediaToolId = "edit" | "merge" | "mp3" | "script";
 
 interface MergeQueueItem {
   id: string;
@@ -85,31 +86,13 @@ const TOOL_TABS: {
   id: MediaToolId;
   label: string;
   shortDesc: string;
-  icon: typeof Minimize2;
+  icon: typeof SlidersHorizontal;
 }[] = [
   {
-    id: "compress",
-    label: "Giảm dung lượng",
-    shortDesc: "Nén video MP4 H.264",
-    icon: Minimize2,
-  },
-  {
-    id: "mp3",
-    label: "Tách âm thanh",
-    shortDesc: "Xuất file MP3 nhẹ",
-    icon: Music,
-  },
-  {
-    id: "trim",
-    label: "Cắt đoạn",
-    shortDesc: "Cắt theo mốc thời gian",
-    icon: Scissors,
-  },
-  {
-    id: "mute",
-    label: "Xóa âm thanh",
-    shortDesc: "Tắt tiếng video nhanh",
-    icon: VolumeX,
+    id: "edit",
+    label: "Chỉnh sửa Video",
+    shortDesc: "Nén · Cắt đoạn · Xóa tiếng",
+    icon: SlidersHorizontal,
   },
   {
     id: "merge",
@@ -118,9 +101,15 @@ const TOOL_TABS: {
     icon: Layers,
   },
   {
+    id: "mp3",
+    label: "Tách âm thanh",
+    shortDesc: "Xuất file MP3 nhẹ",
+    icon: Music,
+  },
+  {
     id: "script",
     label: "Tạo Script (AI)",
-    shortDesc: "Video → MP3 → Kịch bản",
+    shortDesc: "Video → MP3 → Kịch bản & Phụ đề",
     icon: FileText,
   },
 ];
@@ -136,7 +125,10 @@ export function MediaToolsPage({
 }: MediaToolsPageProps) {
   const playerRef = useRef<HTMLVideoElement & HTMLAudioElement>(null);
 
-  const [activeTool, setActiveTool] = useState<MediaToolId>("compress");
+  const [activeTool, setActiveTool] = useState<MediaToolId>("edit");
+  const [editCompress, setEditCompress] = useState(true);
+  const [editTrim, setEditTrim] = useState(false);
+  const [editMute, setEditMute] = useState(false);
   const [sourceFile, setSourceFile] = useState<FileInfo | null>(null);
   const [durationSecs, setDurationSecs] = useState<number | null>(null);
   const [outputTarget, setOutputTarget] = useState<OutputTargetState>(() =>
@@ -249,9 +241,9 @@ export function MediaToolsPage({
         });
       }
 
-      // If audio file is loaded while video-only tool is active, switch to MP3 or Trim cleanly
-      if (isAudioFilePath(path) && (activeTool === "compress" || activeTool === "mute")) {
-        setActiveTool("trim");
+      // If audio file is loaded while in Edit mode, automatically enable Trim
+      if (isAudioFilePath(path) && activeTool === "edit") {
+        setEditTrim(true);
       }
 
       const dur = await api.probeMediaDuration(path);
@@ -302,33 +294,49 @@ export function MediaToolsPage({
     }
   }
 
+  const effectiveEditCompress = editCompress && !isSourceAudio;
+  const effectiveEditMute = editMute && !isSourceAudio;
+  const effectiveEditCount =
+    Number(effectiveEditCompress) + Number(editTrim) + Number(effectiveEditMute);
+
   const outputDialogMeta = useMemo(() => {
     const stem = sourceFile ? getFileStem(sourceFile.path) : "ket_qua";
     const srcExt = sourceFile ? getFileExtension(sourceFile.path) || "mp4" : "mp4";
     switch (activeTool) {
-      case "compress":
+      case "edit": {
+        if (effectiveEditCount === 1) {
+          if (effectiveEditCompress) {
+            return {
+              defaultFileName: `${stem}_compressed_${compPreset}.mp4`,
+              filterName: "Video MP4",
+              extensions: ["mp4"],
+            };
+          }
+          if (editTrim) {
+            return {
+              defaultFileName: `${stem}_trim.${srcExt}`,
+              filterName: "Media",
+              extensions: [srcExt, "mp4", "mp3"],
+            };
+          }
+          return {
+            defaultFileName: `${stem}_muted.${srcExt}`,
+            filterName: "Video",
+            extensions: [srcExt, "mp4"],
+          };
+        }
+        const outExt = effectiveEditCompress ? "mp4" : srcExt;
         return {
-          defaultFileName: `${stem}_compressed_${compPreset}.mp4`,
-          filterName: "Video MP4",
-          extensions: ["mp4"],
+          defaultFileName: `${stem}_edited.${outExt}`,
+          filterName: effectiveEditCompress ? "Video MP4" : "Media",
+          extensions: effectiveEditCompress ? ["mp4"] : [srcExt, "mp4"],
         };
+      }
       case "mp3":
         return {
           defaultFileName: `${stem}_${mp3Preset}.mp3`,
           filterName: "Audio MP3",
           extensions: ["mp3"],
-        };
-      case "trim":
-        return {
-          defaultFileName: `${stem}_trim.${srcExt}`,
-          filterName: "Media",
-          extensions: [srcExt, "mp4", "mp3"],
-        };
-      case "mute":
-        return {
-          defaultFileName: `${stem}_muted.${srcExt}`,
-          filterName: "Video",
-          extensions: [srcExt, "mp4"],
         };
       case "merge": {
         const firstStem = mergeQueue[0]
@@ -347,7 +355,16 @@ export function MediaToolsPage({
           extensions: ["md", "txt", "srt"],
         };
     }
-  }, [activeTool, compPreset, mergeQueue, mp3Preset, sourceFile]);
+  }, [
+    activeTool,
+    compPreset,
+    editTrim,
+    effectiveEditCompress,
+    effectiveEditCount,
+    mergeQueue,
+    mp3Preset,
+    sourceFile,
+  ]);
 
   function addMergePaths(paths: string[]) {
     if (paths.length === 0) return;
@@ -846,6 +863,15 @@ export function MediaToolsPage({
     }
     setExportNotice("");
 
+    if (activeTool === "edit" && effectiveEditCount === 0) {
+      setErrMsg(
+        isSourceAudio
+          ? "File âm thanh chỉ hỗ trợ Cắt đoạn ở mục này. Hãy bật Cắt đoạn hoặc chuyển sang Tách âm thanh / Tạo Script (AI)."
+          : "Hãy bật ít nhất 1 thao tác chỉnh sửa (Giảm dung lượng, Cắt đoạn hoặc Xóa âm thanh)."
+      );
+      return;
+    }
+
     const refPath =
       activeTool === "merge"
         ? mergeQueue[0].path
@@ -853,11 +879,18 @@ export function MediaToolsPage({
     const overrides = resolveOutputOverrides(outputTarget, refPath);
     const id = `media_studio_${activeTool}_${Date.now()}`;
     const toolInfo = TOOL_TABS.find((t) => t.id === activeTool);
-    const toolLabel = toolInfo?.label ?? activeTool;
+    const editParts: string[] = [];
+    if (effectiveEditCompress) editParts.push("Giảm dung lượng");
+    if (editTrim) editParts.push("Cắt đoạn");
+    if (effectiveEditMute) editParts.push("Xóa âm thanh");
+    const toolLabel =
+      activeTool === "edit" && editParts.length > 0
+        ? editParts.join(" + ")
+        : (toolInfo?.label ?? activeTool);
 
     let startSecs = 0;
     let endSecs: number | null = null;
-    if (activeTool === "trim") {
+    if (activeTool === "edit" && editTrim) {
       const parsedStart = parseTimecodeToSeconds(trimStart || "0");
       if (parsedStart === null) {
         setErrMsg("Mốc bắt đầu không hợp lệ. Ví dụ hợp lệ: 00:15 hoặc 15.");
@@ -927,11 +960,19 @@ export function MediaToolsPage({
             out_dir_override: overrides.outDirOverride,
             out_path_override: overrides.outPathOverride,
           });
-        } else if (activeTool === "compress" && sourceFile) {
-          out = await api.compressVideo({
+        } else if (activeTool === "edit" && sourceFile) {
+          out = await api.editVideo({
             taskId: id,
-            videoPath: sourceFile.path,
-            preset: compPreset,
+            inputPath: sourceFile.path,
+            compressPreset: effectiveEditCompress ? compPreset : null,
+            trim: editTrim
+              ? {
+                  startSecs,
+                  endSecs,
+                  fastCopy: effectiveEditCompress ? false : trimFastCopy,
+                }
+              : null,
+            mute: effectiveEditMute,
             ...overrides,
           });
         } else if (activeTool === "mp3" && sourceFile) {
@@ -939,21 +980,6 @@ export function MediaToolsPage({
             taskId: id,
             videoPath: sourceFile.path,
             preset: mp3Preset,
-            ...overrides,
-          });
-        } else if (activeTool === "trim" && sourceFile) {
-          out = await api.trimMedia({
-            taskId: id,
-            inputPath: sourceFile.path,
-            startSecs,
-            endSecs,
-            fastCopy: trimFastCopy,
-            ...overrides,
-          });
-        } else if (sourceFile) {
-          out = await api.muteVideo({
-            taskId: id,
-            videoPath: sourceFile.path,
             ...overrides,
           });
         }
@@ -987,7 +1013,7 @@ export function MediaToolsPage({
   }
 
   const videoToolBlockedOnAudio =
-    isSourceAudio && (activeTool === "compress" || activeTool === "mute");
+    activeTool === "edit" && effectiveEditCount === 0;
 
   const filteredSegments = useMemo(() => {
     if (!scriptResult) return [];
@@ -1056,7 +1082,7 @@ export function MediaToolsPage({
           </div>
         </div>
 
-        <div className="mt-2.5 grid grid-cols-2 gap-1.5 rounded-xl border border-slate-200 bg-slate-100 p-1.5 sm:grid-cols-3 lg:grid-cols-6">
+        <div className="mt-2.5 grid grid-cols-2 gap-1.5 rounded-xl border border-slate-200 bg-slate-100 p-1.5 lg:grid-cols-4">
           {TOOL_TABS.map((t) => {
             const Icon = t.icon;
             const active = activeTool === t.id;
@@ -1067,7 +1093,7 @@ export function MediaToolsPage({
                 disabled={taskId !== null}
                 title={t.shortDesc}
                 onClick={() => handleSelectTool(t.id)}
-                className={`flex items-center gap-2 rounded-lg px-2.5 py-2 text-left transition disabled:opacity-60 ${
+                className={`flex items-center gap-2.5 rounded-lg px-3 py-2.5 text-left transition disabled:opacity-60 ${
                   active
                     ? "bg-white text-indigo-700 shadow-xs ring-1 ring-indigo-200"
                     : "text-slate-600 hover:bg-white/60 hover:text-slate-900"
@@ -1416,27 +1442,202 @@ export function MediaToolsPage({
 
             {/* Active Tool Config Panel */}
             <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-3.5">
-              {activeTool === "compress" && (
+              {activeTool === "edit" && (
                 <div className="space-y-3">
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-700">
-                      Cấu hình nén video MP4 (H.264 + AAC)
-                    </label>
-                    <SelectField
-                      value={compPreset}
-                      onChange={setCompPreset}
-                      options={videoPresets.map((p) => ({
-                        value: p.key,
-                        label: p.label,
-                      }))}
-                      size="md"
-                      className="mt-1 w-full"
-                      ariaLabel="Preset nén video"
-                    />
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-xs text-slate-600">
+                      Bật một hoặc nhiều thao tác để FFmpeg xử lý trong{" "}
+                      <strong>1 lượt duy nhất</strong>.
+                    </p>
+                    <span className="rounded-full bg-indigo-100 px-2 py-0.5 text-[11px] font-semibold text-indigo-700">
+                      Đang chọn {effectiveEditCount}/3
+                    </span>
                   </div>
-                  <p className="text-xs text-slate-500">
-                    Giảm mạnh dung lượng để gửi Gemini nhanh hơn hoặc chia sẻ dễ dàng mà vẫn giữ rõ lời nói.
-                  </p>
+
+                  {/* 1. Giảm dung lượng */}
+                  <div
+                    className={`rounded-lg border p-3 transition ${
+                      effectiveEditCompress
+                        ? "border-indigo-200 bg-white"
+                        : "border-slate-200 bg-slate-50/70"
+                    }`}
+                  >
+                    <label
+                      className={`flex items-center justify-between gap-2 ${
+                        isSourceAudio ? "cursor-not-allowed opacity-60" : "cursor-pointer"
+                      }`}
+                    >
+                      <span className="flex items-center gap-2 text-xs font-semibold text-slate-800">
+                        <input
+                          type="checkbox"
+                          disabled={isSourceAudio || taskId !== null}
+                          checked={effectiveEditCompress}
+                          onChange={(e) => setEditCompress(e.target.checked)}
+                          className="rounded border-slate-300 text-indigo-600"
+                        />
+                        <Minimize2 className="h-3.5 w-3.5 text-indigo-600" />
+                        Giảm dung lượng (MP4 H.264)
+                      </span>
+                      {isSourceAudio && (
+                        <span className="text-[11px] text-slate-400">
+                          Chỉ áp dụng cho video
+                        </span>
+                      )}
+                    </label>
+                    {effectiveEditCompress && (
+                      <div className="mt-2.5 space-y-2 border-t border-slate-100 pt-2.5">
+                        <SelectField
+                          value={compPreset}
+                          onChange={setCompPreset}
+                          options={videoPresets.map((p) => ({
+                            value: p.key,
+                            label: p.label,
+                          }))}
+                          size="md"
+                          className="w-full"
+                          ariaLabel="Preset nén video"
+                        />
+                        <p className="text-[11px] text-slate-500">
+                          Giảm mạnh dung lượng để gửi Gemini nhanh hơn hoặc chia sẻ dễ dàng mà vẫn giữ rõ lời nói.
+                        </p>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* 2. Cắt đoạn */}
+                  <div
+                    className={`rounded-lg border p-3 transition ${
+                      editTrim
+                        ? "border-indigo-200 bg-white"
+                        : "border-slate-200 bg-slate-50/70"
+                    }`}
+                  >
+                    <label className="flex cursor-pointer items-center justify-between gap-2">
+                      <span className="flex items-center gap-2 text-xs font-semibold text-slate-800">
+                        <input
+                          type="checkbox"
+                          disabled={taskId !== null}
+                          checked={editTrim}
+                          onChange={(e) => setEditTrim(e.target.checked)}
+                          className="rounded border-slate-300 text-indigo-600"
+                        />
+                        <Scissors className="h-3.5 w-3.5 text-indigo-600" />
+                        Cắt đoạn theo mốc thời gian
+                      </span>
+                    </label>
+                    {editTrim && (
+                      <div className="mt-2.5 space-y-2.5 border-t border-slate-100 pt-2.5">
+                        <div className="grid gap-3 sm:grid-cols-2">
+                          <div>
+                            <div className="flex items-center justify-between gap-2">
+                              <label className="text-xs font-semibold text-slate-700">
+                                Mốc bắt đầu (mm:ss hoặc giây)
+                              </label>
+                              {sourceFile && (
+                                <button
+                                  type="button"
+                                  onClick={() => capturePlayerTime("start")}
+                                  className="text-[11px] font-semibold text-indigo-600 hover:underline"
+                                >
+                                  Lấy từ player
+                                </button>
+                              )}
+                            </div>
+                            <input
+                              type="text"
+                              value={trimStart}
+                              onChange={(e) => setTrimStart(e.target.value)}
+                              placeholder="VD: 00:10"
+                              className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm"
+                            />
+                          </div>
+
+                          <div>
+                            <div className="flex items-center justify-between gap-2">
+                              <label className="text-xs font-semibold text-slate-700">
+                                Mốc kết thúc (để trống = đến hết)
+                              </label>
+                              {sourceFile && (
+                                <button
+                                  type="button"
+                                  onClick={() => capturePlayerTime("end")}
+                                  className="text-[11px] font-semibold text-indigo-600 hover:underline"
+                                >
+                                  Lấy từ player
+                                </button>
+                              )}
+                            </div>
+                            <input
+                              type="text"
+                              value={trimEnd}
+                              onChange={(e) => setTrimEnd(e.target.value)}
+                              placeholder={
+                                durationSecs
+                                  ? formatEditableTimecode(durationSecs)
+                                  : "VD: 01:30"
+                              }
+                              className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm"
+                            />
+                          </div>
+                        </div>
+
+                        {effectiveEditCompress ? (
+                          <p className="text-[11px] text-slate-500">
+                            Đang bật <strong>Giảm dung lượng</strong> nên FFmpeg sẽ cắt và nén cùng lúc trong 1 lượt (chính xác từng khung hình).
+                          </p>
+                        ) : (
+                          <label className="flex cursor-pointer items-center gap-2 text-xs text-slate-700">
+                            <input
+                              type="checkbox"
+                              checked={trimFastCopy}
+                              onChange={(e) => setTrimFastCopy(e.target.checked)}
+                              className="rounded border-slate-300"
+                            />
+                            <span>
+                              Cắt siêu nhanh giữ nguyên luồng gốc (<code>-c copy</code>). Bỏ chọn nếu muốn cắt chính xác từng khung hình.
+                            </span>
+                          </label>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* 3. Xóa âm thanh */}
+                  <div
+                    className={`rounded-lg border p-3 transition ${
+                      effectiveEditMute
+                        ? "border-indigo-200 bg-white"
+                        : "border-slate-200 bg-slate-50/70"
+                    }`}
+                  >
+                    <label
+                      className={`flex items-center justify-between gap-2 ${
+                        isSourceAudio ? "cursor-not-allowed opacity-60" : "cursor-pointer"
+                      }`}
+                    >
+                      <span className="flex items-center gap-2 text-xs font-semibold text-slate-800">
+                        <input
+                          type="checkbox"
+                          disabled={isSourceAudio || taskId !== null}
+                          checked={effectiveEditMute}
+                          onChange={(e) => setEditMute(e.target.checked)}
+                          className="rounded border-slate-300 text-indigo-600"
+                        />
+                        <VolumeX className="h-3.5 w-3.5 text-indigo-600" />
+                        Xóa âm thanh (<code>-an</code>)
+                      </span>
+                      {isSourceAudio && (
+                        <span className="text-[11px] text-slate-400">
+                          Chỉ áp dụng cho video
+                        </span>
+                      )}
+                    </label>
+                    {effectiveEditMute && (
+                      <p className="mt-2 border-t border-slate-100 pt-2 text-[11px] text-slate-500">
+                        Loại bỏ toàn bộ track âm thanh khỏi video đầu ra{effectiveEditCompress ? " trong cùng lượt nén" : " (giữ nguyên luồng hình ảnh gốc nên xử lý cực nhanh)"}.
+                      </p>
+                    )}
+                  </div>
                 </div>
               )}
 
@@ -1462,80 +1663,6 @@ export function MediaToolsPage({
                     Mức <strong>Nhỏ gọn</strong> &amp; <strong>Cân bằng</strong> dùng mono để tối ưu cho giọng nói và giảm một nửa dung lượng file.
                   </p>
                 </div>
-              )}
-
-              {activeTool === "trim" && (
-                <div className="space-y-3">
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <div>
-                      <div className="flex items-center justify-between gap-2">
-                        <label className="text-xs font-semibold text-slate-700">
-                          Mốc bắt đầu (mm:ss hoặc giây)
-                        </label>
-                        {sourceFile && (
-                          <button
-                            type="button"
-                            onClick={() => capturePlayerTime("start")}
-                            className="text-[11px] font-semibold text-indigo-600 hover:underline"
-                          >
-                            Lấy từ player
-                          </button>
-                        )}
-                      </div>
-                      <input
-                        type="text"
-                        value={trimStart}
-                        onChange={(e) => setTrimStart(e.target.value)}
-                        placeholder="VD: 00:10"
-                        className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm"
-                      />
-                    </div>
-
-                    <div>
-                      <div className="flex items-center justify-between gap-2">
-                        <label className="text-xs font-semibold text-slate-700">
-                          Mốc kết thúc (để trống = đến hết)
-                        </label>
-                        {sourceFile && (
-                          <button
-                            type="button"
-                            onClick={() => capturePlayerTime("end")}
-                            className="text-[11px] font-semibold text-indigo-600 hover:underline"
-                          >
-                            Lấy từ player
-                          </button>
-                        )}
-                      </div>
-                      <input
-                        type="text"
-                        value={trimEnd}
-                        onChange={(e) => setTrimEnd(e.target.value)}
-                        placeholder={
-                          durationSecs ? formatEditableTimecode(durationSecs) : "VD: 01:30"
-                        }
-                        className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm"
-                      />
-                    </div>
-                  </div>
-
-                  <label className="flex cursor-pointer items-center gap-2 text-xs text-slate-700">
-                    <input
-                      type="checkbox"
-                      checked={trimFastCopy}
-                      onChange={(e) => setTrimFastCopy(e.target.checked)}
-                      className="rounded border-slate-300"
-                    />
-                    <span>
-                      Cắt siêu nhanh giữ nguyên luồng gốc (<code>-c copy</code>). Bỏ chọn nếu muốn cắt chính xác từng khung hình.
-                    </span>
-                  </label>
-                </div>
-              )}
-
-              {activeTool === "mute" && (
-                <p className="text-xs text-slate-600">
-                  Loại bỏ toàn bộ track âm thanh khỏi video và giữ nguyên luồng hình ảnh gốc (<code>-c:v copy -an</code>) nên xử lý gần như tức thì.
-                </p>
               )}
 
               {activeTool === "merge" && (
@@ -1817,7 +1944,9 @@ export function MediaToolsPage({
 
               {videoToolBlockedOnAudio && (
                 <div className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                  File nguồn đang là file âm thanh. Thao tác này chỉ áp dụng cho video — hãy chuyển sang <strong>Tách âm thanh</strong>, <strong>Cắt đoạn</strong> hoặc <strong>Tạo Script (AI)</strong>.
+                  {isSourceAudio
+                    ? "File nguồn đang là file âm thanh (chỉ hỗ trợ Cắt đoạn ở mục này). Hãy bật Cắt đoạn hoặc chuyển sang Tách âm thanh / Tạo Script (AI)."
+                    : "Hãy bật ít nhất 1 thao tác chỉnh sửa ở trên để bắt đầu xử lý."}
                 </div>
               )}
 

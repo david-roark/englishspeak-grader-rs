@@ -347,14 +347,7 @@ pub fn build_compress_video_args(
     (args, out_path)
 }
 
-/// Dựng tham số CLI `ffmpeg` cho cắt đoạn video/audio theo mốc giây.
-pub fn build_trim_media_args_to(
-    input_path: &Path,
-    start_secs: f64,
-    end_secs: Option<f64>,
-    fast_copy: bool,
-    out_path: &Path,
-) -> Result<Vec<String>> {
+fn validate_trim_bounds(start_secs: f64, end_secs: Option<f64>) -> Result<()> {
     if !start_secs.is_finite() || start_secs < 0.0 {
         return Err(GraderError::InvalidInput(
             "Thời điểm bắt đầu phải lớn hơn hoặc bằng 0.".into(),
@@ -367,6 +360,18 @@ pub fn build_trim_media_args_to(
             ));
         }
     }
+    Ok(())
+}
+
+/// Dựng tham số CLI `ffmpeg` cho cắt đoạn video/audio theo mốc giây.
+pub fn build_trim_media_args_to(
+    input_path: &Path,
+    start_secs: f64,
+    end_secs: Option<f64>,
+    fast_copy: bool,
+    out_path: &Path,
+) -> Result<Vec<String>> {
+    validate_trim_bounds(start_secs, end_secs)?;
 
     let mut args = vec![
         "-y".into(),
@@ -441,6 +446,138 @@ pub fn build_mute_video_args_to(video_path: &Path, out_path: &Path) -> Vec<Strin
         out_path.to_string_lossy().into_owned(),
     ]);
     args
+}
+
+/// Khoảng thời gian cắt đoạn cho thao tác chỉnh sửa gộp.
+#[derive(Debug, Clone, Copy)]
+pub struct TrimRange {
+    pub start_secs: f64,
+    pub end_secs: Option<f64>,
+    pub fast_copy: bool,
+}
+
+/// Tùy chọn gộp 1–3 thao tác chỉnh sửa (nén, cắt đoạn, xóa âm thanh) trong một lần chạy `ffmpeg`.
+#[derive(Debug, Clone)]
+pub struct VideoEditOptions {
+    pub compress_preset: Option<String>,
+    pub trim: Option<TrimRange>,
+    pub mute: bool,
+}
+
+/// Dựng tham số CLI `ffmpeg` kết hợp cắt đoạn, nén video và/hoặc xóa âm thanh trong một lượt.
+pub fn build_edit_video_args_to(
+    input_path: &Path,
+    options: &VideoEditOptions,
+    out_path: &Path,
+) -> Result<Vec<String>> {
+    if options.compress_preset.is_none() && options.trim.is_none() && !options.mute {
+        return Err(GraderError::InvalidInput(
+            "Vui lòng chọn ít nhất một thao tác chỉnh sửa.".into(),
+        ));
+    }
+    if let Some(trim) = options.trim {
+        validate_trim_bounds(trim.start_secs, trim.end_secs)?;
+    }
+
+    let mut args = vec!["-y".into()];
+    if let Some(trim) = options.trim {
+        args.push("-ss".into());
+        args.push(format!("{:.3}", trim.start_secs));
+    }
+    args.push("-i".into());
+    args.push(input_path.to_string_lossy().into_owned());
+
+    if let Some(trim) = options.trim {
+        if let Some(end) = trim.end_secs {
+            args.push("-t".into());
+            args.push(format!("{:.3}", end - trim.start_secs));
+        }
+    }
+
+    if let Some(preset_key) = options.compress_preset.as_deref() {
+        let cfg = get_video_preset(preset_key);
+        if let Some(scale) = cfg.scale {
+            args.push("-vf".into());
+            args.push(format!("scale={scale}"));
+        }
+        args.extend([
+            "-c:v".into(),
+            "libx264".into(),
+            "-pix_fmt".into(),
+            "yuv420p".into(),
+            "-preset".into(),
+            cfg.preset.into(),
+        ]);
+        if let Some(crf) = cfg.crf {
+            args.push("-crf".into());
+            args.push(crf.to_string());
+        }
+        if let Some(vbr) = cfg.video_bitrate {
+            args.push("-b:v".into());
+            args.push(vbr.into());
+        }
+        if options.mute {
+            args.push("-an".into());
+        } else {
+            args.extend([
+                "-c:a".into(),
+                "aac".into(),
+                "-b:a".into(),
+                cfg.audio_bitrate.into(),
+            ]);
+        }
+        args.extend(["-movflags".into(), "+faststart".into()]);
+    } else if let Some(trim) = options.trim {
+        if trim.fast_copy {
+            if options.mute {
+                args.extend(["-c:v".into(), "copy".into(), "-an".into()]);
+            } else {
+                args.extend(["-c".into(), "copy".into()]);
+            }
+        } else if is_mp3_file(out_path) {
+            args.extend([
+                "-vn".into(),
+                "-acodec".into(),
+                "libmp3lame".into(),
+                "-b:a".into(),
+                "192k".into(),
+            ]);
+        } else {
+            args.extend([
+                "-c:v".into(),
+                "libx264".into(),
+                "-pix_fmt".into(),
+                "yuv420p".into(),
+                "-preset".into(),
+                "fast".into(),
+                "-crf".into(),
+                "23".into(),
+            ]);
+            if options.mute {
+                args.push("-an".into());
+            } else {
+                args.extend(["-c:a".into(), "aac".into(), "-b:a".into(), "128k".into()]);
+            }
+        }
+        if is_mp4_family(out_path) {
+            args.extend(["-movflags".into(), "+faststart".into()]);
+        }
+    } else {
+        // Chỉ xóa âm thanh
+        args.extend(["-c:v".into(), "copy".into(), "-an".into()]);
+        if is_mp4_family(out_path) {
+            args.extend(["-movflags".into(), "+faststart".into()]);
+        }
+    }
+
+    args.extend([
+        "-progress".into(),
+        "pipe:1".into(),
+        "-nostats".into(),
+        out_path.to_string_lossy().into_owned(),
+    ]);
+
+    Ok(args)
 }
 
 /// Escape đường dẫn file phụ đề/thư mục font để truyền an toàn qua 2 lớp parser (`avfilter_graph_parse2` + `av_opt_set_from_string`) của `-vf ass=filename=...` trong `ffmpeg` (đặc biệt là dấu `:` trong đường dẫn Windows như `C:\...`).
@@ -1018,6 +1155,69 @@ where
         "Đang tắt tiếng video...",
         "Tắt tiếng video hoàn tất.",
         "Tắt tiếng video thất bại",
+        false,
+        on_progress,
+        cancel,
+    )
+    .await
+}
+
+/// Chỉnh sửa video/audio gộp (cắt đoạn, giảm dung lượng, xóa âm thanh) trong một lượt `ffmpeg`.
+pub async fn edit_video_to<F>(
+    ffmpeg_exe: &Path,
+    input_path: &Path,
+    options: &VideoEditOptions,
+    default_out_dir: &Path,
+    out_path_override: Option<&Path>,
+    on_progress: F,
+    cancel: Option<&CancellationToken>,
+) -> Result<PathBuf>
+where
+    F: FnMut(MediaProgress) + Send,
+{
+    ensure_input_exists(input_path, false)?;
+    let (stem, ext) = file_stem_and_ext(input_path, "media", "mp4");
+    let has_compress = options.compress_preset.is_some();
+    let has_trim = options.trim.is_some();
+    let active_count = usize::from(has_compress) + usize::from(has_trim) + usize::from(options.mute);
+
+    let default_name = match (
+        active_count,
+        options.compress_preset.as_deref(),
+        has_trim,
+        options.mute,
+    ) {
+        (1, Some(preset_key), false, false) => {
+            let cfg = get_video_preset(preset_key);
+            format!("{stem}_compressed_{}.mp4", cfg.key)
+        }
+        (1, None, true, false) => format!("{stem}_trim.{ext}"),
+        (1, None, false, true) => format!("{stem}_muted.{ext}"),
+        _ => {
+            let out_ext = if has_compress { "mp4" } else { ext };
+            format!("{stem}_edited.{out_ext}")
+        }
+    };
+
+    let out_path = resolve_target_path(default_out_dir, default_name, out_path_override);
+    let args = build_edit_video_args_to(input_path, options, &out_path)?;
+    let total_dur = probe_duration_secs(ffmpeg_exe, input_path).await;
+    let target_dur = match options.trim {
+        Some(t) => match t.end_secs {
+            Some(e) => Some((e - t.start_secs).max(0.1)),
+            None => total_dur.map(|d| (d - t.start_secs).max(0.1)),
+        },
+        None => total_dur,
+    };
+
+    execute_ffmpeg_media_job(
+        ffmpeg_exe,
+        out_path,
+        args,
+        target_dur,
+        "Đang chỉnh sửa media...",
+        "Chỉnh sửa media hoàn tất.",
+        "Chỉnh sửa media thất bại",
         false,
         on_progress,
         cancel,

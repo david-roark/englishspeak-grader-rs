@@ -3,15 +3,15 @@ use std::time::{Duration, Instant};
 
 use grader_core::export::{default_export_path, export_to_excel};
 use grader_core::{
-    build_prompt_parts, compress_video_to, embed_subtitles_video_with_options_to,
+    build_prompt_parts, compress_video_to, edit_video_to, embed_subtitles_video_with_options_to,
     export_segment_clip_to, extract_mp3_to, extract_speech_mp3_to, fmt_num, format_result_markdown,
     format_transcript_ass_with_options, format_transcript_markdown, format_transcript_srt_with_mode,
     format_transcript_srt_with_options, format_transcript_text, merge_videos_to, mp3_presets,
-    mute_video_to, probe_duration_secs, probe_video_dimensions, resolve_ffmpeg, trim_media_to, video_presets,
-    AssSubtitleOptions, AssessmentDetail, AssessmentSummary, AssignmentImage, GeminiClient,
-    GradingAssignment, MediaResolution, Mp3Preset, NewAssessment, PromptParts, PromptProfile,
-    Rubric, TranscribeOptions, TranscriptResult, VideoAdjustments, VideoPreset, DEFAULT_MODEL,
-    FALLBACK_MODELS,
+    mute_video_to, probe_duration_secs, probe_video_dimensions, resolve_ffmpeg, trim_media_to,
+    video_presets, AssSubtitleOptions, AssessmentDetail, AssessmentSummary, AssignmentImage,
+    GeminiClient, GradingAssignment, MediaResolution, Mp3Preset, NewAssessment, PromptParts,
+    PromptProfile, Rubric, TranscribeOptions, TranscriptResult, TrimRange, VideoAdjustments,
+    VideoEditOptions, VideoPreset, DEFAULT_MODEL, FALLBACK_MODELS,
 };
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State};
@@ -884,6 +884,87 @@ pub async fn mute_video_cmd(
         out_path,
         orig_size_mb,
         "muted.mp4",
+    ))
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TrimEditInput {
+    pub start_secs: f64,
+    pub end_secs: Option<f64>,
+    pub fast_copy: bool,
+}
+
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub async fn edit_video_cmd(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    task_id: String,
+    input_path: String,
+    compress_preset: Option<String>,
+    trim: Option<TrimEditInput>,
+    mute: bool,
+    out_dir_override: Option<String>,
+    out_path_override: Option<String>,
+) -> Result<MediaOutput, String> {
+    let ffmpeg = resolve_ffmpeg_for_state(&state)?;
+    let src = PathBuf::from(&input_path);
+    let orig_size_mb = std::fs::metadata(&src)
+        .map(|m| m.len() as f64 / (1024.0 * 1024.0))
+        .unwrap_or(0.0);
+    let (out_dir, out_file) =
+        resolve_media_output_targets(&state, out_dir_override, out_path_override);
+
+    let options = VideoEditOptions {
+        compress_preset,
+        trim: trim.map(|t| TrimRange {
+            start_secs: t.start_secs,
+            end_secs: t.end_secs,
+            fast_copy: t.fast_copy,
+        }),
+        mute,
+    };
+
+    let cancel = state.register_task(&task_id).await;
+    let res = edit_video_to(
+        &ffmpeg,
+        &src,
+        &options,
+        &out_dir,
+        out_file.as_deref(),
+        |p| emit_progress(&app, &task_id, p.stage, p.percent),
+        Some(&cancel),
+    )
+    .await;
+    state.finish_task(&task_id).await;
+
+    let out_path = match res {
+        Ok(p) => {
+            state.activity_log.info(
+                "media",
+                format!(
+                    "Chỉnh sửa media thành công: {}",
+                    p.file_name()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or("edited.mp4")
+                ),
+            );
+            p
+        }
+        Err(e) => {
+            let msg = e.to_string();
+            state
+                .activity_log
+                .error("media", format!("Chỉnh sửa media thất bại: {msg}"));
+            return Err(msg);
+        }
+    };
+    Ok(build_media_output(
+        &state,
+        out_path,
+        orig_size_mb,
+        "edited.mp4",
     ))
 }
 

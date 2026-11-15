@@ -16,17 +16,19 @@ pub use gemini::{
     FALLBACK_MODELS, UPLOAD_TTL_SECS,
 };
 pub use media::{
-    build_embed_subtitles_video_args_to, build_embed_subtitles_video_args_with_fonts_to,
+    build_edit_video_args_to, build_embed_subtitles_video_args_to,
+    build_embed_subtitles_video_args_with_fonts_to,
     build_embed_subtitles_video_args_with_options_to, build_export_segment_clip_args_to,
     build_extract_speech_mp3_args_to, build_merge_videos_fast_concat_args_to,
-    build_merge_videos_filter_complex_args_to, compress_video, compress_video_to,
+    build_merge_videos_filter_complex_args_to, compress_video, compress_video_to, edit_video_to,
     embed_subtitles_video_to, embed_subtitles_video_with_fonts_to,
     embed_subtitles_video_with_options_to, escape_ffmpeg_filter_path, export_segment_clip_to,
     extract_mp3, extract_mp3_to, extract_speech_mp3_to, get_mp3_preset, get_video_preset,
     merge_videos_to, mp3_presets, mute_video_to, parse_has_audio_from_stderr,
     parse_video_dimensions_from_stderr, probe_duration_secs, probe_video_dimensions,
     resolve_ffmpeg, trim_media_to, video_presets, MediaProgress, MergeVideoInput, Mp3Preset,
-    VideoAdjustments, VideoPreset, DEFAULT_MP3_PRESET, DEFAULT_VIDEO_PRESET,
+    TrimRange, VideoAdjustments, VideoEditOptions, VideoPreset, DEFAULT_MP3_PRESET,
+    DEFAULT_VIDEO_PRESET,
 };
 pub use paths::AppPaths;
 pub use prompts::{

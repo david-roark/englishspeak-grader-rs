@@ -174,6 +174,29 @@ export const api = {
       outPathOverride: params.outPathOverride || null,
     }),
 
+  editVideo: (params: {
+    taskId: string;
+    inputPath: string;
+    compressPreset?: string | null;
+    trim?: {
+      startSecs: number;
+      endSecs?: number | null;
+      fastCopy: boolean;
+    } | null;
+    mute: boolean;
+    outDirOverride?: string;
+    outPathOverride?: string;
+  }) =>
+    invoke<MediaOutput>("edit_video_cmd", {
+      taskId: params.taskId,
+      inputPath: params.inputPath,
+      compressPreset: params.compressPreset ?? null,
+      trim: params.trim ?? null,
+      mute: params.mute,
+      outDirOverride: params.outDirOverride || null,
+      outPathOverride: params.outPathOverride || null,
+    }),
+
   probeMediaDuration: (path: string) =>
     invoke<number | null>("probe_media_duration", { path }),
 

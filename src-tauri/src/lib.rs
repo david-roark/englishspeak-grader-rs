@@ -50,6 +50,7 @@ pub fn run() {
             commands::extract_mp3_cmd,
             commands::trim_media_cmd,
             commands::mute_video_cmd,
+            commands::edit_video_cmd,
             commands::generate_script_cmd,
             commands::export_transcript_file,
             commands::embed_subtitles_video_cmd,
