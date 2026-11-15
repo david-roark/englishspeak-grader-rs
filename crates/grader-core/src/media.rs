@@ -443,15 +443,20 @@ pub fn build_mute_video_args_to(video_path: &Path, out_path: &Path) -> Vec<Strin
     args
 }
 
-/// Escape đường dẫn file phụ đề để truyền an toàn vào `-vf ass=...` của `ffmpeg`.
+/// Escape đường dẫn file phụ đề/thư mục font để truyền an toàn qua 2 lớp parser (`avfilter_graph_parse2` + `av_opt_set_from_string`) của `-vf ass=filename=...` trong `ffmpeg` (đặc biệt là dấu `:` trong đường dẫn Windows như `C:\...`).
 pub fn escape_ffmpeg_filter_path(path: &Path) -> String {
     let forward = path.to_string_lossy().replace('\\', "/");
-    let mut out = String::with_capacity(forward.len() + 8);
+    let mut out = String::with_capacity(forward.len() + 16);
     for ch in forward.chars() {
-        if matches!(ch, ':' | '\'' | '[' | ']' | ',' | ';') {
-            out.push('\\');
+        match ch {
+            ':' => out.push_str(r"\\:"),
+            '\'' => out.push_str(r"\\\'"),
+            '[' | ']' | ',' | ';' => {
+                out.push('\\');
+                out.push(ch);
+            }
+            _ => out.push(ch),
         }
-        out.push(ch);
     }
     out
 }
@@ -491,9 +496,9 @@ pub fn build_embed_subtitles_video_args_with_fonts_to(
         let filter = match fonts_dir {
             Some(dir) if !dir.as_os_str().is_empty() => {
                 let escaped_dir = escape_ffmpeg_filter_path(dir);
-                format!("ass={escaped_sub}:fontsdir={escaped_dir}")
+                format!("ass=filename={escaped_sub}:fontsdir={escaped_dir}")
             }
-            _ => format!("ass={escaped_sub}"),
+            _ => format!("ass=filename={escaped_sub}"),
         };
         args.extend([
             "-vf".into(),

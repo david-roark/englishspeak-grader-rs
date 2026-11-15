@@ -9,8 +9,9 @@ use grader_core::media::{
     build_compress_video_args, build_embed_subtitles_video_args_to,
     build_embed_subtitles_video_args_with_fonts_to, build_extract_mp3_args,
     build_extract_speech_mp3_args_to, build_mute_video_args_to, build_trim_media_args_to,
-    compress_video, escape_ffmpeg_filter_path, extract_mp3, parse_duration_from_stderr,
-    parse_video_dimensions_from_stderr, resolve_ffmpeg, DEFAULT_MP3_PRESET, DEFAULT_VIDEO_PRESET,
+    compress_video, embed_subtitles_video_with_fonts_to, escape_ffmpeg_filter_path, extract_mp3,
+    parse_duration_from_stderr, parse_video_dimensions_from_stderr, resolve_ffmpeg,
+    DEFAULT_MP3_PRESET, DEFAULT_VIDEO_PRESET,
 };
 use grader_core::prompts::PromptProfile;
 use grader_core::rubrics::{get_builtin_rubric, AssignmentImage, Rubric};
@@ -626,8 +627,8 @@ async fn test_transcribe_audio_with_wiremock_and_normalize() {
 
 #[test]
 fn test_embed_subtitles_video_args_and_filter_escape() {
-    let escaped = escape_ffmpeg_filter_path(Path::new(r"C:\sub\test[1]:2.ass"));
-    assert_eq!(escaped, r"C\:/sub/test\[1\]\:2.ass");
+    let escaped = escape_ffmpeg_filter_path(Path::new(r"C:\sub\test[1]:2'3,4;5.ass"));
+    assert_eq!(escaped, r"C\\:/sub/test\[1\]\\:2\\\'3\,4\;5.ass");
 
     let burn_args = build_embed_subtitles_video_args_to(
         Path::new("/tmp/in.mp4"),
@@ -637,7 +638,7 @@ fn test_embed_subtitles_video_args_and_filter_escape() {
     );
     assert!(burn_args
         .windows(2)
-        .any(|w| w[0] == "-vf" && w[1] == "ass=/tmp/sub/demo.ass"));
+        .any(|w| w[0] == "-vf" && w[1] == "ass=filename=/tmp/sub/demo.ass"));
     assert!(burn_args.iter().any(|a| a == "libx264"));
     assert!(burn_args.iter().any(|a| a == "aac"));
     assert!(!burn_args.iter().any(|a| a == "mov_text"));
@@ -695,7 +696,7 @@ fn test_embed_subtitles_args_with_fontsdir_and_dimension_parser() {
         .expect("-vf filter missing");
     assert_eq!(
         args[vf_idx + 1],
-        r"ass=/tmp/sub/demo\:1.ass:fontsdir=/app/public/fonts\:v2"
+        r"ass=filename=/tmp/sub/demo\\:1.ass:fontsdir=/app/public/fonts\\:v2"
     );
     assert!(args
         .windows(2)
@@ -732,4 +733,64 @@ fn test_embed_subtitles_args_with_fontsdir_and_dimension_parser() {
     );
 
     assert_eq!(parse_video_dimensions_from_stderr("Audio only"), None);
+}
+
+#[tokio::test]
+async fn test_real_ffmpeg_embed_subtitles_with_special_chars_if_available() {
+    let Some(ffmpeg) = resolve_ffmpeg(None, None) else {
+        return;
+    };
+
+    let dir = TempDir::new().unwrap();
+    let sample_video = dir.path().join("sample.mp4");
+    let status = tokio::process::Command::new(&ffmpeg)
+        .args([
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=c=black:s=320x240:d=1",
+            "-f",
+            "lavfi",
+            "-i",
+            "anullsrc=r=44100:cl=stereo",
+            "-t",
+            "1",
+            "-c:v",
+            "libx264",
+            "-c:a",
+            "aac",
+        ])
+        .arg(&sample_video)
+        .status()
+        .await
+        .expect("run ffmpeg lavfi");
+    if !status.success() {
+        return;
+    }
+
+    let fonts_dir = dir.path().join("My Fonts:v2 [1]=test");
+    std::fs::create_dir_all(&fonts_dir).unwrap();
+    let sub_path = dir.path().join("sub:1 [a],b;c'd=e.ass");
+    std::fs::write(
+        &sub_path,
+        "[Script Info]\nScriptType: v4.00+\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\nDialogue: 0,0:00:00.00,0:00:01.00,Default,,0,0,0,,Hello\n",
+    )
+    .unwrap();
+
+    let out = embed_subtitles_video_with_fonts_to(
+        &ffmpeg,
+        &sample_video,
+        &sub_path,
+        true,
+        Some(&fonts_dir),
+        dir.path(),
+        None,
+        |_| {},
+        None,
+    )
+    .await
+    .expect("burn-in subtitles with special characters in path should succeed");
+    assert!(out.exists());
+    assert!(std::fs::metadata(&out).unwrap().len() > 0);
 }
