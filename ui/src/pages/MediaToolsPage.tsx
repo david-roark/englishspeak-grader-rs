@@ -1095,7 +1095,7 @@ export function MediaToolsPage({
       {/* Step 2: Feature-tailored workspace */}
       <div className="grid items-start gap-4 md:grid-cols-12">
         {/* Left column: Sticky Media Preview, Player Controls & Inline Subtitle Editor */}
-        <div className="space-y-3 md:sticky md:top-3 md:col-span-5 md:max-h-[calc(100vh-1.5rem)] md:overflow-y-auto md:pr-0.5 xl:col-span-4">
+        <div className="space-y-3 md:sticky md:top-3 md:col-span-6 md:max-h-[calc(100vh-1.5rem)] md:overflow-y-auto md:pr-0.5">
           {activeTool === "merge" ? (
             <div className="space-y-3 rounded-xl border border-slate-200 bg-white p-3.5 shadow-xs">
               <div className="flex items-center justify-between gap-2">
@@ -1399,7 +1399,7 @@ export function MediaToolsPage({
         </div>
 
         {/* Right column: Active Tool Settings + Destination + Results */}
-        <div className="space-y-3 md:col-span-7 xl:col-span-8">
+        <div className="space-y-3 md:col-span-6">
           <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-xs">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
