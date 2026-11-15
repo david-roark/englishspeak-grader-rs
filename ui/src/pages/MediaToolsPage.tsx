@@ -451,6 +451,53 @@ export function MediaToolsPage({
     setScriptDirty(true);
   }
 
+  function insertSegmentAtCurrentTime(): number | null {
+    if (!scriptResult) return null;
+    const defaultSpeaker = scriptResult.transcript.speakers[0] ?? {
+      id: "S1",
+      label: "Học sinh 1",
+      role: "student",
+      name_confident: false,
+    };
+    const currentSecs = Math.max(
+      0,
+      playerRef.current?.currentTime ?? playerCurrentTime
+    );
+    const segments = scriptResult.transcript.segments;
+    const foundPos = segments.findIndex((seg) => {
+      const start = parseTimecodeToSeconds(seg.start_time);
+      return start !== null && start > currentSecs;
+    });
+    const insertPos = foundPos === -1 ? segments.length : foundPos;
+    const newSeg: TranscriptSegment = {
+      start_time: formatEditableTimecode(currentSecs),
+      end_time: formatEditableTimecode(currentSecs + 3),
+      speaker_id: defaultSpeaker.id,
+      speaker_label: defaultSpeaker.label,
+      role: defaultSpeaker.role,
+      text: "",
+      translation: "",
+      grammar_note: "",
+    };
+
+    setScriptResult((prev) => {
+      if (!prev) return prev;
+      const nextSegments = [...prev.transcript.segments];
+      nextSegments.splice(insertPos, 0, newSeg);
+      return {
+        ...prev,
+        transcript: {
+          ...prev.transcript,
+          segments: nextSegments,
+        },
+      };
+    });
+    setEditingSegIdx(insertPos);
+    setExportNotice("");
+    setScriptDirty(true);
+    return insertPos;
+  }
+
   function deleteSegmentAt(idx: number) {
     setExportNotice("");
     setScriptDirty(true);
@@ -829,6 +876,9 @@ export function MediaToolsPage({
 
             {scriptResult && (
               <LiveSubtitlePreview
+                segments={scriptResult.transcript.segments}
+                speakers={scriptResult.transcript.speakers}
+                activeSegmentIdx={activeSegmentIdx}
                 activePreviewSegment={activePreviewSegment}
                 playerCurrentTime={playerCurrentTime}
                 subtitleFont={subtitleFont}
@@ -837,6 +887,15 @@ export function MediaToolsPage({
                 showSubText={showSubText}
                 showSubTranslation={showSubTranslation}
                 showSubGrammar={showSubGrammar}
+                scriptDirty={scriptDirty}
+                exportBusy={exportBusy}
+                onSeekPlayerTo={seekPlayerTo}
+                onUpdateSegmentAt={updateSegmentAt}
+                onAssignSegmentSpeaker={assignSegmentSpeaker}
+                onCaptureSegmentTime={captureSegmentTime}
+                onInsertSegmentAtCurrentTime={insertSegmentAtCurrentTime}
+                onDeleteSegmentAt={deleteSegmentAt}
+                onSaveUpdatedMarkdown={() => void handleSaveUpdatedMarkdown()}
               />
             )}
           </div>
