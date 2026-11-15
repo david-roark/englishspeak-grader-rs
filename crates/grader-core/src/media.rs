@@ -650,6 +650,13 @@ pub async fn probe_video_dimensions(ffmpeg_exe: &Path, video_path: &Path) -> Opt
     parse_video_dimensions_from_stderr(&stderr)
 }
 
+/// Kiểm tra stderr của `ffmpeg -i` xem file có luồng âm thanh hay không.
+pub fn parse_has_audio_from_stderr(stderr: &str) -> bool {
+    stderr
+        .lines()
+        .any(|line| line.contains("Stream #") && line.contains("Audio:"))
+}
+
 /// Trích xuất kích thước hiển thị `(width, height)` từ output stderr của `ffmpeg -i`,
 /// có tính tới metadata xoay 90°/270° trên luồng video.
 pub fn parse_video_dimensions_from_stderr(stderr: &str) -> Option<(u32, u32)> {
@@ -1273,6 +1280,219 @@ where
         cancel,
     )
     .await
+}
+
+/// Thông tin một file video đầu vào khi ghép nhiều video.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MergeVideoInput {
+    pub path: PathBuf,
+    pub has_audio: bool,
+    pub duration_secs: Option<f64>,
+}
+
+/// Dựng tham số CLI `ffmpeg` để ghép nhiều video qua `filter_complex` (chuẩn hóa kích thước, fps và âm thanh).
+pub fn build_merge_videos_filter_complex_args_to(
+    inputs: &[MergeVideoInput],
+    target_width: u32,
+    target_height: u32,
+    out_path: &Path,
+) -> Vec<String> {
+    let w = (target_width.max(2)) & !1;
+    let h = (target_height.max(2)) & !1;
+
+    let mut args = vec!["-y".into()];
+    for item in inputs {
+        args.push("-i".into());
+        args.push(item.path.to_string_lossy().into_owned());
+    }
+
+    let mut filter_parts = Vec::with_capacity(inputs.len() * 2 + 1);
+    let mut concat_inputs = String::new();
+    for (idx, item) in inputs.iter().enumerate() {
+        filter_parts.push(format!(
+            "[{idx}:v]scale={w}:{h}:force_original_aspect_ratio=decrease,pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:black,setsar=1,fps=30,format=yuv420p[v{idx}]"
+        ));
+        if item.has_audio {
+            filter_parts.push(format!(
+                "[{idx}:a]aresample=44100,aformat=sample_fmts=fltp:channel_layouts=stereo[a{idx}]"
+            ));
+        } else {
+            let dur = item.duration_secs.unwrap_or(1.0).max(0.1);
+            filter_parts.push(format!(
+                "anullsrc=channel_layout=stereo:sample_rate=44100:d={dur:.3}[a{idx}]"
+            ));
+        }
+        concat_inputs.push_str(&format!("[v{idx}][a{idx}]"));
+    }
+    filter_parts.push(format!(
+        "{concat_inputs}concat=n={}:v=1:a=1[outv][outa]",
+        inputs.len()
+    ));
+
+    args.extend([
+        "-filter_complex".into(),
+        filter_parts.join(";"),
+        "-map".into(),
+        "[outv]".into(),
+        "-map".into(),
+        "[outa]".into(),
+        "-c:v".into(),
+        "libx264".into(),
+        "-pix_fmt".into(),
+        "yuv420p".into(),
+        "-preset".into(),
+        "fast".into(),
+        "-crf".into(),
+        "23".into(),
+        "-c:a".into(),
+        "aac".into(),
+        "-b:a".into(),
+        "128k".into(),
+        "-map_metadata".into(),
+        "-1".into(),
+        "-metadata".into(),
+        "title= ".into(),
+        "-movflags".into(),
+        "+faststart".into(),
+        "-progress".into(),
+        "pipe:1".into(),
+        "-nostats".into(),
+        out_path.to_string_lossy().into_owned(),
+    ]);
+    args
+}
+
+/// Dựng tham số CLI `ffmpeg` cho ghép siêu nhanh (`-f concat -c copy`) từ file danh sách.
+pub fn build_merge_videos_fast_concat_args_to(
+    concat_list_path: &Path,
+    out_path: &Path,
+) -> Vec<String> {
+    vec![
+        "-y".into(),
+        "-f".into(),
+        "concat".into(),
+        "-safe".into(),
+        "0".into(),
+        "-i".into(),
+        concat_list_path.to_string_lossy().into_owned(),
+        "-c".into(),
+        "copy".into(),
+        "-map_metadata".into(),
+        "-1".into(),
+        "-metadata".into(),
+        "title= ".into(),
+        "-movflags".into(),
+        "+faststart".into(),
+        "-progress".into(),
+        "pipe:1".into(),
+        "-nostats".into(),
+        out_path.to_string_lossy().into_owned(),
+    ]
+}
+
+/// Ghép nhiều file video thành 1 file MP4 theo thứ tự đã chọn.
+#[allow(clippy::too_many_arguments)]
+pub async fn merge_videos_to<F>(
+    ffmpeg_exe: &Path,
+    video_paths: &[PathBuf],
+    fast_copy: bool,
+    default_out_dir: &Path,
+    out_path_override: Option<&Path>,
+    on_progress: F,
+    cancel: Option<&CancellationToken>,
+) -> Result<PathBuf>
+where
+    F: FnMut(MediaProgress) + Send,
+{
+    if video_paths.len() < 2 {
+        return Err(GraderError::InvalidInput(
+            "Cần chọn ít nhất 2 video để ghép.".into(),
+        ));
+    }
+    for path in video_paths {
+        ensure_input_exists(path, false)?;
+    }
+
+    let first_path = &video_paths[0];
+    let (stem, _) = file_stem_and_ext(first_path, "video", "mp4");
+    let default_name = format!("{stem}_merged.mp4");
+    let out_path = resolve_target_path(default_out_dir, default_name, out_path_override);
+
+    let mut inputs = Vec::with_capacity(video_paths.len());
+    let mut target_dims: Option<(u32, u32)> = None;
+    let mut total_duration = 0.0_f64;
+    let mut has_all_durations = true;
+
+    for (idx, path) in video_paths.iter().enumerate() {
+        let stderr = probe_ffmpeg_stderr(ffmpeg_exe, path)
+            .await
+            .unwrap_or_default();
+        if idx == 0 {
+            target_dims = parse_video_dimensions_from_stderr(&stderr);
+        }
+        let dur = parse_duration_from_stderr(&stderr);
+        if let Some(d) = dur {
+            total_duration += d;
+        } else {
+            has_all_durations = false;
+        }
+        inputs.push(MergeVideoInput {
+            path: path.clone(),
+            has_audio: parse_has_audio_from_stderr(&stderr),
+            duration_secs: dur,
+        });
+    }
+    let total_dur_opt = (has_all_durations && total_duration > 0.0).then_some(total_duration);
+
+    if fast_copy {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis())
+            .unwrap_or(0);
+        let list_path = std::env::temp_dir().join(format!("englishspeak_concat_{stamp}.txt"));
+        let list_body = video_paths
+            .iter()
+            .map(|p| {
+                let escaped = p.to_string_lossy().replace('\'', "'\\''");
+                format!("file '{escaped}'")
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        std::fs::write(&list_path, list_body)?;
+
+        let args = build_merge_videos_fast_concat_args_to(&list_path, &out_path);
+        let res = execute_ffmpeg_media_job(
+            ffmpeg_exe,
+            out_path,
+            args,
+            total_dur_opt,
+            "Đang ghép nhanh các video...",
+            "Ghép video hoàn tất.",
+            "Ghép video thất bại",
+            false,
+            on_progress,
+            cancel,
+        )
+        .await;
+        let _ = tokio::fs::remove_file(&list_path).await;
+        res
+    } else {
+        let (w, h) = target_dims.unwrap_or((1280, 720));
+        let args = build_merge_videos_filter_complex_args_to(&inputs, w, h, &out_path);
+        execute_ffmpeg_media_job(
+            ffmpeg_exe,
+            out_path,
+            args,
+            total_dur_opt,
+            "Đang chuẩn hóa và ghép các video...",
+            "Ghép video hoàn tất.",
+            "Ghép video thất bại",
+            false,
+            on_progress,
+            cancel,
+        )
+        .await
+    }
 }
 
 async fn run_ffmpeg_with_progress<F>(

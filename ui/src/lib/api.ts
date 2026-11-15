@@ -251,6 +251,14 @@ export const api = {
     out_path_override?: string;
   }) => invoke<MediaOutput>("export_segment_clip_cmd", { req }),
 
+  mergeVideos: (req: {
+    task_id: string;
+    video_paths: string[];
+    fast_copy: boolean;
+    out_dir_override?: string;
+    out_path_override?: string;
+  }) => invoke<MediaOutput>("merge_videos_cmd", { req }),
+
   listRubrics: () => invoke<Rubric[]>("list_rubrics"),
   saveCustomRubric: (rubric: Rubric) =>
     invoke<Rubric[]>("save_custom_rubric", { rubric }),
@@ -444,6 +452,30 @@ export const api = {
       ],
     });
     return typeof selected === "string" ? selected : null;
+  },
+
+  pickVideoFiles: async (): Promise<string[]> => {
+    const selected = await open({
+      multiple: true,
+      title: "Chọn các file Video cần ghép",
+      filters: [
+        {
+          name: "Video",
+          extensions: [
+            "mp4",
+            "mov",
+            "webm",
+            "avi",
+            "mkv",
+            "mpeg",
+            "mpg",
+            "wmv",
+          ],
+        },
+      ],
+    });
+    if (Array.isArray(selected)) return selected;
+    return typeof selected === "string" ? [selected] : [];
   },
 
   saveMediaDialog: async (params: {

@@ -9,11 +9,12 @@ use grader_core::media::{
     build_compress_video_args, build_embed_subtitles_video_args_to,
     build_embed_subtitles_video_args_with_fonts_to,
     build_embed_subtitles_video_args_with_options_to, build_export_segment_clip_args_to,
-    build_extract_mp3_args, build_extract_speech_mp3_args_to, build_mute_video_args_to,
-    build_trim_media_args_to, compress_video, embed_subtitles_video_with_fonts_to,
-    escape_ffmpeg_filter_path, extract_mp3, parse_duration_from_stderr,
-    parse_video_dimensions_from_stderr, resolve_ffmpeg, VideoAdjustments, DEFAULT_MP3_PRESET,
-    DEFAULT_VIDEO_PRESET,
+    build_extract_mp3_args, build_extract_speech_mp3_args_to,
+    build_merge_videos_fast_concat_args_to, build_merge_videos_filter_complex_args_to,
+    build_mute_video_args_to, build_trim_media_args_to, compress_video,
+    embed_subtitles_video_with_fonts_to, escape_ffmpeg_filter_path, extract_mp3, merge_videos_to,
+    parse_duration_from_stderr, parse_has_audio_from_stderr, parse_video_dimensions_from_stderr,
+    resolve_ffmpeg, MergeVideoInput, VideoAdjustments, DEFAULT_MP3_PRESET, DEFAULT_VIDEO_PRESET,
 };
 use grader_core::prompts::PromptProfile;
 use grader_core::rubrics::{get_builtin_rubric, AssignmentImage, Rubric};
@@ -849,4 +850,104 @@ fn test_video_adjustments_and_segment_clip_args() {
     assert!(clip_args
         .windows(2)
         .any(|w| w[0] == "-af" && w[1] == "highpass=f=80,lowpass=f=8000,dynaudnorm"));
+}
+
+#[tokio::test]
+async fn test_merge_videos_args_and_real_ffmpeg_if_available() {
+    assert!(parse_has_audio_from_stderr("  Stream #0:1: Audio: aac, 44100 Hz"));
+    assert!(!parse_has_audio_from_stderr("  Stream #0:0: Video: h264, 1280x720"));
+
+    let inputs = vec![
+        MergeVideoInput {
+            path: "/tmp/a.mp4".into(),
+            has_audio: true,
+            duration_secs: Some(2.0),
+        },
+        MergeVideoInput {
+            path: "/tmp/b.mp4".into(),
+            has_audio: false,
+            duration_secs: Some(1.5),
+        },
+    ];
+    let fc_args = build_merge_videos_filter_complex_args_to(
+        &inputs,
+        1281,
+        720,
+        Path::new("/tmp/merged.mp4"),
+    );
+    let fc_idx = fc_args
+        .iter()
+        .position(|a| a == "-filter_complex")
+        .expect("-filter_complex missing");
+    assert!(fc_args[fc_idx + 1].contains("scale=1280:720"));
+    assert!(fc_args[fc_idx + 1].contains("anullsrc=channel_layout=stereo:sample_rate=44100:d=1.500[a1]"));
+    assert!(fc_args[fc_idx + 1].contains("concat=n=2:v=1:a=1[outv][outa]"));
+
+    let fast_args = build_merge_videos_fast_concat_args_to(
+        Path::new("/tmp/list.txt"),
+        Path::new("/tmp/merged_fast.mp4"),
+    );
+    assert!(fast_args.windows(2).any(|w| w[0] == "-f" && w[1] == "concat"));
+    assert!(fast_args.windows(2).any(|w| w[0] == "-c" && w[1] == "copy"));
+
+    let Some(ffmpeg) = resolve_ffmpeg(None, None) else {
+        return;
+    };
+
+    let dir = TempDir::new().unwrap();
+    let v1 = dir.path().join("v1.mp4");
+    let v2 = dir.path().join("v2.mp4");
+    let s1 = tokio::process::Command::new(&ffmpeg)
+        .args([
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=c=blue:s=320x240:d=1",
+            "-f",
+            "lavfi",
+            "-i",
+            "anullsrc=r=44100:cl=stereo",
+            "-t",
+            "1",
+            "-c:v",
+            "libx264",
+            "-c:a",
+            "aac",
+        ])
+        .arg(&v1)
+        .status()
+        .await
+        .expect("run ffmpeg v1");
+    let s2 = tokio::process::Command::new(&ffmpeg)
+        .args([
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=c=red:s=240x320:d=1",
+            "-c:v",
+            "libx264",
+        ])
+        .arg(&v2)
+        .status()
+        .await
+        .expect("run ffmpeg v2 (no audio, different resolution)");
+    if !s1.success() || !s2.success() {
+        return;
+    }
+
+    let merged = merge_videos_to(
+        &ffmpeg,
+        &[v1, v2],
+        false,
+        dir.path(),
+        None,
+        |_| {},
+        None,
+    )
+    .await
+    .expect("merge videos of different resolution & audio should succeed");
+    assert!(merged.exists());
+    assert!(std::fs::metadata(&merged).unwrap().len() > 0);
 }

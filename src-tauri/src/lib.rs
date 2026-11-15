@@ -54,6 +54,7 @@ pub fn run() {
             commands::export_transcript_file,
             commands::embed_subtitles_video_cmd,
             commands::export_segment_clip_cmd,
+            commands::merge_videos_cmd,
             commands::list_rubrics,
             commands::save_custom_rubric,
             commands::clone_rubric,

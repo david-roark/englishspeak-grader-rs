@@ -6,8 +6,8 @@ use grader_core::{
     build_prompt_parts, compress_video_to, embed_subtitles_video_with_options_to,
     export_segment_clip_to, extract_mp3_to, extract_speech_mp3_to, fmt_num, format_result_markdown,
     format_transcript_ass_with_options, format_transcript_markdown, format_transcript_srt_with_mode,
-    format_transcript_srt_with_options, format_transcript_text, mp3_presets, mute_video_to,
-    probe_duration_secs, probe_video_dimensions, resolve_ffmpeg, trim_media_to, video_presets,
+    format_transcript_srt_with_options, format_transcript_text, merge_videos_to, mp3_presets,
+    mute_video_to, probe_duration_secs, probe_video_dimensions, resolve_ffmpeg, trim_media_to, video_presets,
     AssSubtitleOptions, AssessmentDetail, AssessmentSummary, AssignmentImage, GeminiClient,
     GradingAssignment, MediaResolution, Mp3Preset, NewAssessment, PromptParts, PromptProfile,
     Rubric, TranscribeOptions, TranscriptResult, VideoAdjustments, VideoPreset, DEFAULT_MODEL,
@@ -196,6 +196,15 @@ pub struct ExportSegmentClipRequest {
     pub gamma: Option<f32>,
     #[serde(default)]
     pub enhance_audio: Option<bool>,
+    pub out_dir_override: Option<String>,
+    pub out_path_override: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct MergeVideosRequest {
+    pub task_id: String,
+    pub video_paths: Vec<String>,
+    pub fast_copy: bool,
     pub out_dir_override: Option<String>,
     pub out_path_override: Option<String>,
 }
@@ -1401,6 +1410,74 @@ pub async fn export_segment_clip_cmd(
     };
 
     Ok(build_media_output(&state, out_path, orig_size_mb, "clip.mp4"))
+}
+
+#[tauri::command]
+pub async fn merge_videos_cmd(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    req: MergeVideosRequest,
+) -> Result<MediaOutput, String> {
+    let ffmpeg = resolve_ffmpeg_for_state(&state)?;
+    if req.video_paths.len() < 2 {
+        return Err("Cần chọn ít nhất 2 video để ghép.".into());
+    }
+    let paths: Vec<PathBuf> = req.video_paths.iter().map(PathBuf::from).collect();
+    let mut total_size_mb = 0.0_f64;
+    for p in &paths {
+        if !p.is_file() {
+            return Err(format!("Không tìm thấy file video: {}", p.display()));
+        }
+        state.media_server.authorize_path(p);
+        total_size_mb += std::fs::metadata(p)
+            .map(|m| m.len() as f64 / (1024.0 * 1024.0))
+            .unwrap_or(0.0);
+    }
+
+    let (out_dir, out_file) =
+        resolve_media_output_targets(&state, req.out_dir_override, req.out_path_override);
+    let cancel = state.register_task(&req.task_id).await;
+    let res = merge_videos_to(
+        &ffmpeg,
+        &paths,
+        req.fast_copy,
+        &out_dir,
+        out_file.as_deref(),
+        |p| emit_progress(&app, &req.task_id, p.stage, p.percent),
+        Some(&cancel),
+    )
+    .await;
+    state.finish_task(&req.task_id).await;
+
+    let out_path = match res {
+        Ok(p) => {
+            state.activity_log.info(
+                "media",
+                format!(
+                    "Ghép {} video thành công: {}",
+                    paths.len(),
+                    p.file_name()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or("merged.mp4")
+                ),
+            );
+            p
+        }
+        Err(e) => {
+            let msg = e.to_string();
+            state
+                .activity_log
+                .error("media", format!("Ghép video thất bại: {msg}"));
+            return Err(msg);
+        }
+    };
+
+    Ok(build_media_output(
+        &state,
+        out_path,
+        total_size_mb,
+        "merged.mp4",
+    ))
 }
 
 #[tauri::command]

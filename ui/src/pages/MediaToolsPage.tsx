@@ -1,16 +1,21 @@
 import { useMemo, useRef, useState } from "react";
 import {
+  ArrowDown,
+  ArrowUp,
   Clock,
   ExternalLink,
   FileText,
   FolderOpen,
+  Layers,
   Minimize2,
   Music,
+  Plus,
   Repeat,
   RotateCcw,
   Scissors,
   Sparkles,
   Sun,
+  Trash2,
   VolumeX,
 } from "lucide-react";
 import { LiveSubtitlePreview } from "../components/LiveSubtitlePreview";
@@ -51,7 +56,13 @@ import type {
   VideoPreset,
 } from "../lib/types";
 
-type MediaToolId = "compress" | "mp3" | "trim" | "mute" | "script";
+type MediaToolId = "compress" | "mp3" | "trim" | "mute" | "merge" | "script";
+
+interface MergeQueueItem {
+  id: string;
+  path: string;
+  name: string;
+}
 
 interface MediaToolsPageProps {
   apiKeyInput: string;
@@ -98,6 +109,12 @@ const TOOL_TABS: {
     label: "Xóa âm thanh",
     shortDesc: "Tắt tiếng video nhanh",
     icon: VolumeX,
+  },
+  {
+    id: "merge",
+    label: "Ghép video",
+    shortDesc: "Nối nhiều video thành 1",
+    icon: Layers,
   },
   {
     id: "script",
@@ -184,6 +201,8 @@ export function MediaToolsPage({
   const [videoContrast, setVideoContrast] = useState(1);
   const [videoGamma, setVideoGamma] = useState(1);
   const [enhanceExportAudio, setEnhanceExportAudio] = useState(false);
+  const [mergeQueue, setMergeQueue] = useState<MergeQueueItem[]>([]);
+  const [mergeFastCopy, setMergeFastCopy] = useState(false);
 
   const hasVideoAdjustments =
     Math.abs(videoBrightness) > 0.005 ||
@@ -308,6 +327,16 @@ export function MediaToolsPage({
           filterName: "Video",
           extensions: [srcExt, "mp4"],
         };
+      case "merge": {
+        const firstStem = mergeQueue[0]
+          ? getFileStem(mergeQueue[0].path)
+          : stem;
+        return {
+          defaultFileName: `${firstStem}_merged.mp4`,
+          filterName: "Video MP4",
+          extensions: ["mp4"],
+        };
+      }
       case "script":
         return {
           defaultFileName: `${stem}_script.md`,
@@ -315,7 +344,44 @@ export function MediaToolsPage({
           extensions: ["md", "txt", "srt"],
         };
     }
-  }, [activeTool, compPreset, mp3Preset, sourceFile]);
+  }, [activeTool, compPreset, mergeQueue, mp3Preset, sourceFile]);
+
+  function addMergePaths(paths: string[]) {
+    if (paths.length === 0) return;
+    setErrMsg("");
+    setMergeQueue((prev) => [
+      ...prev,
+      ...paths.map((p, idx) => ({
+        id: `${Date.now()}_${idx}_${Math.random().toString(36).slice(2, 7)}`,
+        path: p,
+        name: p.split(/[/\\]/).pop() || p,
+      })),
+    ]);
+  }
+
+  async function handlePickMergeVideos() {
+    try {
+      const picked = await api.pickVideoFiles();
+      addMergePaths(picked);
+    } catch (e) {
+      setErrMsg(String(e));
+    }
+  }
+
+  function moveMergeItem(idx: number, delta: -1 | 1) {
+    setMergeQueue((prev) => {
+      const target = idx + delta;
+      if (target < 0 || target >= prev.length) return prev;
+      const next = [...prev];
+      const [moved] = next.splice(idx, 1);
+      next.splice(target, 0, moved);
+      return next;
+    });
+  }
+
+  function removeMergeItem(id: string) {
+    setMergeQueue((prev) => prev.filter((item) => item.id !== id));
+  }
 
   function capturePlayerTime(target: "start" | "end") {
     const current = playerRef.current?.currentTime;
@@ -760,7 +826,14 @@ export function MediaToolsPage({
   }
 
   async function handleRunTool() {
-    if (!sourceFile) return;
+    if (activeTool === "merge") {
+      if (mergeQueue.length < 2) {
+        setErrMsg("Hãy chọn ít nhất 2 video để ghép.");
+        return;
+      }
+    } else if (!sourceFile) {
+      return;
+    }
     setErrMsg("");
     setLatestResult(null);
     if (activeTool !== "script") {
@@ -768,7 +841,11 @@ export function MediaToolsPage({
     }
     setExportNotice("");
 
-    const overrides = resolveOutputOverrides(outputTarget, sourceFile.path);
+    const refPath =
+      activeTool === "merge"
+        ? mergeQueue[0].path
+        : (sourceFile?.path ?? "");
+    const overrides = resolveOutputOverrides(outputTarget, refPath);
     const id = `media_studio_${activeTool}_${Date.now()}`;
     const toolInfo = TOOL_TABS.find((t) => t.id === activeTool);
     const toolLabel = toolInfo?.label ?? activeTool;
@@ -802,7 +879,7 @@ export function MediaToolsPage({
     });
 
     try {
-      if (activeTool === "script") {
+      if (activeTool === "script" && sourceFile) {
         const res = await api.generateScript({
           task_id: id,
           api_key: apiKeyInput.trim() || undefined,
@@ -836,22 +913,30 @@ export function MediaToolsPage({
           return [...nextItems, ...prev].slice(0, 8);
         });
       } else {
-        let out: MediaOutput;
-        if (activeTool === "compress") {
+        let out: MediaOutput | null = null;
+        if (activeTool === "merge") {
+          out = await api.mergeVideos({
+            task_id: id,
+            video_paths: mergeQueue.map((item) => item.path),
+            fast_copy: mergeFastCopy,
+            out_dir_override: overrides.outDirOverride,
+            out_path_override: overrides.outPathOverride,
+          });
+        } else if (activeTool === "compress" && sourceFile) {
           out = await api.compressVideo({
             taskId: id,
             videoPath: sourceFile.path,
             preset: compPreset,
             ...overrides,
           });
-        } else if (activeTool === "mp3") {
+        } else if (activeTool === "mp3" && sourceFile) {
           out = await api.extractMp3({
             taskId: id,
             videoPath: sourceFile.path,
             preset: mp3Preset,
             ...overrides,
           });
-        } else if (activeTool === "trim") {
+        } else if (activeTool === "trim" && sourceFile) {
           out = await api.trimMedia({
             taskId: id,
             inputPath: sourceFile.path,
@@ -860,7 +945,7 @@ export function MediaToolsPage({
             fastCopy: trimFastCopy,
             ...overrides,
           });
-        } else {
+        } else if (sourceFile) {
           out = await api.muteVideo({
             taskId: id,
             videoPath: sourceFile.path,
@@ -868,9 +953,11 @@ export function MediaToolsPage({
           });
         }
 
-        setLatestResult({ toolLabel, output: out });
+        if (!out) return;
+        const finalOut = out;
+        setLatestResult({ toolLabel, output: finalOut });
         setSessionHistory((prev) => [
-          { id, toolLabel, output: out },
+          { id, toolLabel, output: finalOut },
           ...prev.slice(0, 7),
         ]);
       }
@@ -1367,6 +1454,154 @@ export function MediaToolsPage({
                 </p>
               )}
 
+              {activeTool === "merge" && (
+                <div className="space-y-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-xs text-slate-600">
+                      Chọn từ <strong>2 video trở lên</strong> theo thứ tự cần nối. Hệ thống tự chuẩn hóa kích thước &amp; âm thanh để ghép mượt kể cả khi các video khác độ phân giải.
+                    </p>
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <button
+                        type="button"
+                        disabled={taskId !== null}
+                        onClick={() => void handlePickMergeVideos()}
+                        className="inline-flex items-center gap-1 rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-indigo-700 disabled:opacity-50"
+                      >
+                        <Plus className="h-3.5 w-3.5" />
+                        Chọn thêm video
+                      </button>
+                      {sourceFile && !isSourceAudio && (
+                        <button
+                          type="button"
+                          disabled={taskId !== null}
+                          onClick={() => addMergePaths([sourceFile.path])}
+                          className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 hover:border-indigo-300 hover:bg-indigo-50 hover:text-indigo-700 disabled:opacity-50"
+                        >
+                          <Plus className="h-3.5 w-3.5" />
+                          Thêm file nguồn
+                        </button>
+                      )}
+                      {mergeQueue.length > 0 && (
+                        <button
+                          type="button"
+                          disabled={taskId !== null}
+                          onClick={() => setMergeQueue([])}
+                          className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-600 hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600 disabled:opacity-50"
+                        >
+                          Xóa tất cả
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {sessionHistory.some(
+                    (h) => !isAudioFilePath(h.output.output_path) && /\.(mp4|mov|mkv|webm|avi)$/i.test(h.output.output_path)
+                  ) && (
+                    <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
+                      <span className="font-semibold text-slate-500">
+                        Thêm nhanh từ phiên:
+                      </span>
+                      {sessionHistory
+                        .filter(
+                          (h) =>
+                            !isAudioFilePath(h.output.output_path) &&
+                            /\.(mp4|mov|mkv|webm|avi)$/i.test(h.output.output_path)
+                        )
+                        .slice(0, 4)
+                        .map((h) => (
+                          <button
+                            key={h.id}
+                            type="button"
+                            disabled={taskId !== null}
+                            onClick={() => addMergePaths([h.output.output_path])}
+                            className="inline-flex items-center gap-1 rounded-full border border-indigo-200 bg-white px-2 py-0.5 font-medium text-indigo-700 hover:bg-indigo-50"
+                            title={h.output.output_path}
+                          >
+                            <Plus className="h-2.5 w-2.5" />
+                            {h.output.file_name}
+                          </button>
+                        ))}
+                    </div>
+                  )}
+
+                  {mergeQueue.length === 0 ? (
+                    <div className="rounded-lg border border-dashed border-slate-300 bg-white px-4 py-6 text-center text-xs text-slate-500">
+                      Chưa có video nào trong danh sách ghép. Bấm{" "}
+                      <strong>Chọn thêm video</strong> ở trên để bắt đầu.
+                    </div>
+                  ) : (
+                    <div className="max-h-60 space-y-1.5 overflow-y-auto pr-1">
+                      {mergeQueue.map((item, idx) => (
+                        <div
+                          key={item.id}
+                          className="flex items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs"
+                        >
+                          <div className="flex min-w-0 flex-1 items-center gap-2">
+                            <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-indigo-100 text-[11px] font-bold text-indigo-700">
+                              {idx + 1}
+                            </span>
+                            <div className="min-w-0">
+                              <p className="truncate font-semibold text-slate-800">
+                                {item.name}
+                              </p>
+                              <p className="truncate text-[10px] text-slate-400">
+                                {item.path}
+                              </p>
+                            </div>
+                          </div>
+                          <div className="flex shrink-0 items-center gap-1">
+                            <button
+                              type="button"
+                              disabled={idx === 0 || taskId !== null}
+                              onClick={() => moveMergeItem(idx, -1)}
+                              className="rounded border border-slate-200 bg-slate-50 p-1 text-slate-600 hover:bg-indigo-50 hover:text-indigo-700 disabled:opacity-40"
+                              title="Đưa lên trước"
+                              aria-label="Đưa lên trước"
+                            >
+                              <ArrowUp className="h-3 w-3" />
+                            </button>
+                            <button
+                              type="button"
+                              disabled={
+                                idx === mergeQueue.length - 1 || taskId !== null
+                              }
+                              onClick={() => moveMergeItem(idx, 1)}
+                              className="rounded border border-slate-200 bg-slate-50 p-1 text-slate-600 hover:bg-indigo-50 hover:text-indigo-700 disabled:opacity-40"
+                              title="Đưa xuống sau"
+                              aria-label="Đưa xuống sau"
+                            >
+                              <ArrowDown className="h-3 w-3" />
+                            </button>
+                            <button
+                              type="button"
+                              disabled={taskId !== null}
+                              onClick={() => removeMergeItem(item.id)}
+                              className="rounded border border-slate-200 bg-slate-50 p-1 text-slate-500 hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600 disabled:opacity-40"
+                              title="Xóa khỏi danh sách"
+                              aria-label="Xóa khỏi danh sách"
+                            >
+                              <Trash2 className="h-3 w-3" />
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  <label className="flex cursor-pointer items-center gap-2 text-xs text-slate-700">
+                    <input
+                      type="checkbox"
+                      checked={mergeFastCopy}
+                      onChange={(e) => setMergeFastCopy(e.target.checked)}
+                      className="rounded border-slate-300"
+                    />
+                    <span>
+                      Ghép siêu nhanh không encode lại (<code>-c copy</code>, chỉ dùng khi các video cùng kích thước &amp; định dạng).
+                    </span>
+                  </label>
+                </div>
+              )}
+
               {activeTool === "script" && (
                 <div className="space-y-3">
                   <div className="grid gap-3 sm:grid-cols-2">
@@ -1498,7 +1733,9 @@ export function MediaToolsPage({
                   type="button"
                   onClick={() => void handleRunTool()}
                   disabled={
-                    !sourceFile ||
+                    (activeTool === "merge"
+                      ? mergeQueue.length < 2
+                      : !sourceFile) ||
                     taskId !== null ||
                     (!ffmpegAvailable && toolNeedsFfmpeg) ||
                     videoToolBlockedOnAudio
@@ -1510,6 +1747,8 @@ export function MediaToolsPage({
                     ? "Đang xử lý..."
                     : activeTool === "script"
                     ? "Tách MP3 & Tạo Script AI"
+                    : activeTool === "merge"
+                    ? `Bắt đầu ghép (${mergeQueue.length} video)`
                     : "Bắt đầu xử lý"}
                 </button>
               </div>
