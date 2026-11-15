@@ -2,6 +2,7 @@ import { useMemo, useRef, useState } from "react";
 import {
   ArrowDown,
   ArrowUp,
+  ArrowUpLeft,
   Clock,
   ExternalLink,
   FileText,
@@ -170,6 +171,7 @@ export function MediaToolsPage({
   const [percent, setPercent] = useState<number | null>(null);
   const [errMsg, setErrMsg] = useState("");
   const [latestResult, setLatestResult] = useState<{
+    toolId: MediaToolId;
     toolLabel: string;
     output: MediaOutput;
   } | null>(null);
@@ -203,6 +205,7 @@ export function MediaToolsPage({
   const [enhanceExportAudio, setEnhanceExportAudio] = useState(false);
   const [mergeQueue, setMergeQueue] = useState<MergeQueueItem[]>([]);
   const [mergeFastCopy, setMergeFastCopy] = useState(false);
+  const [mergePreviewPath, setMergePreviewPath] = useState<string | null>(null);
 
   const hasVideoAdjustments =
     Math.abs(videoBrightness) > 0.005 ||
@@ -357,6 +360,7 @@ export function MediaToolsPage({
         name: p.split(/[/\\]/).pop() || p,
       })),
     ]);
+    setMergePreviewPath((cur) => cur ?? paths[0]);
   }
 
   async function handlePickMergeVideos() {
@@ -738,6 +742,7 @@ export function MediaToolsPage({
         out_dir_override: overrides.outDirOverride,
       });
       setLatestResult({
+        toolId: "script",
         toolLabel: `Clip câu #${idx + 1}`,
         output: out,
       });
@@ -955,7 +960,10 @@ export function MediaToolsPage({
 
         if (!out) return;
         const finalOut = out;
-        setLatestResult({ toolLabel, output: finalOut });
+        if (activeTool === "merge") {
+          setMergePreviewPath(finalOut.output_path);
+        }
+        setLatestResult({ toolId: activeTool, toolLabel, output: finalOut });
         setSessionHistory((prev) => [
           { id, toolLabel, output: finalOut },
           ...prev.slice(0, 7),
@@ -1022,6 +1030,9 @@ export function MediaToolsPage({
       ? scriptResult.transcript.segments[activeSegmentIdx]
       : null;
 
+  const activeToolInfo =
+    TOOL_TABS.find((t) => t.id === activeTool) ?? TOOL_TABS[0];
+
   return (
     <div className="space-y-4">
       {!ffmpegAvailable && (
@@ -1032,31 +1043,141 @@ export function MediaToolsPage({
         </div>
       )}
 
+      {/* Step 1: Feature selector across the top */}
+      <div className="rounded-xl border border-slate-200 bg-white p-3.5 shadow-xs">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h2 className="text-sm font-bold text-slate-900">
+              1. Chọn tính năng xử lý Media
+            </h2>
+            <p className="text-xs text-slate-500">
+              Chọn thao tác muốn làm trước, rồi chọn video và tùy chỉnh thông số ở bên dưới.
+            </p>
+          </div>
+        </div>
+
+        <div className="mt-2.5 grid grid-cols-2 gap-1.5 rounded-xl border border-slate-200 bg-slate-100 p-1.5 sm:grid-cols-3 lg:grid-cols-6">
+          {TOOL_TABS.map((t) => {
+            const Icon = t.icon;
+            const active = activeTool === t.id;
+            return (
+              <button
+                key={t.id}
+                type="button"
+                disabled={taskId !== null}
+                title={t.shortDesc}
+                onClick={() => handleSelectTool(t.id)}
+                className={`flex items-center gap-2 rounded-lg px-2.5 py-2 text-left transition disabled:opacity-60 ${
+                  active
+                    ? "bg-white text-indigo-700 shadow-xs ring-1 ring-indigo-200"
+                    : "text-slate-600 hover:bg-white/60 hover:text-slate-900"
+                }`}
+              >
+                <Icon
+                  className={`h-4 w-4 shrink-0 ${
+                    active ? "text-indigo-600" : "text-slate-400"
+                  }`}
+                />
+                <div className="min-w-0">
+                  <p className="truncate text-xs font-semibold leading-tight">
+                    {t.label}
+                  </p>
+                  <p className="truncate text-[10px] text-slate-400">
+                    {t.shortDesc}
+                  </p>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Step 2: Feature-tailored workspace */}
       <div className="grid items-start gap-4 md:grid-cols-12">
-        {/* Left column: Drag & drop source, preview & destination */}
-        <div className="space-y-3 md:sticky md:top-4 md:col-span-5 xl:col-span-4">
-          <div className="space-y-3 rounded-xl border border-slate-200 bg-white p-3.5 shadow-xs">
-            <div className="flex items-center justify-between">
-              <h2 className="text-sm font-bold text-slate-900">
-                1. File nguồn (Kéo thả hoặc chọn)
-              </h2>
-              {durationSecs != null && (
-                <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-700">
-                  <Clock className="h-3 w-3" />
-                  {formatDuration(durationSecs)}
-                </span>
+        {/* Left column: Sticky Media Preview, Player Controls & Inline Subtitle Editor */}
+        <div className="space-y-3 md:sticky md:top-3 md:col-span-5 md:max-h-[calc(100vh-1.5rem)] md:overflow-y-auto md:pr-0.5 xl:col-span-4">
+          {activeTool === "merge" ? (
+            <div className="space-y-3 rounded-xl border border-slate-200 bg-white p-3.5 shadow-xs">
+              <div className="flex items-center justify-between gap-2">
+                <h2 className="text-sm font-bold text-slate-900">
+                  2. Xem trước Video ghép
+                </h2>
+                {mergePreviewPath && (
+                  <span
+                    className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
+                      latestResult?.output.output_path === mergePreviewPath
+                        ? "bg-emerald-100 text-emerald-800"
+                        : "bg-indigo-100 text-indigo-700"
+                    }`}
+                  >
+                    {latestResult?.output.output_path === mergePreviewPath
+                      ? "Kết quả đã ghép"
+                      : "Clip trong danh sách"}
+                  </span>
+                )}
+              </div>
+
+              {mergePreviewPath ? (
+                <>
+                  <LocalMediaPlayer
+                    path={mergePreviewPath}
+                    kind="video"
+                    playbackRate={playbackRate}
+                  />
+                  <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-2 text-xs">
+                    <span className="min-w-0 flex-1 truncate font-medium text-slate-700">
+                      {mergePreviewPath.split(/[/\\]/).pop() || mergePreviewPath}
+                    </span>
+                    <button
+                      type="button"
+                      disabled={taskId !== null}
+                      onClick={() => {
+                        void loadSourcePath(mergePreviewPath);
+                        handleSelectTool("script");
+                      }}
+                      className="inline-flex shrink-0 items-center gap-1 rounded-md bg-indigo-600 px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-indigo-700 disabled:opacity-50"
+                      title="Nạp video này làm file nguồn và chuyển sang Tạo Script (AI)"
+                    >
+                      <Sparkles className="h-3 w-3" />
+                      Tạo Script từ video này
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <div className="flex aspect-video flex-col items-center justify-center rounded-lg border border-dashed border-slate-300 bg-slate-50 px-4 text-center text-xs text-slate-500">
+                  <Layers className="mb-2 h-7 w-7 text-slate-300" />
+                  <p className="font-semibold text-slate-700">
+                    Chưa có video để xem trước
+                  </p>
+                  <p className="mt-1 text-[11px]">
+                    Chọn các video ở bên phải — bấm vào từng video để xem trước, hoặc xem ngay video thành phẩm sau khi ghép xong.
+                  </p>
+                </div>
               )}
             </div>
+          ) : (
+            <div className="space-y-3 rounded-xl border border-slate-200 bg-white p-3.5 shadow-xs">
+              <div className="flex items-center justify-between">
+                <h2 className="text-sm font-bold text-slate-900">
+                  2. Chọn Video / Audio nguồn
+                </h2>
+                {durationSecs != null && (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-700">
+                    <Clock className="h-3 w-3" />
+                    {formatDuration(durationSecs)}
+                  </span>
+                )}
+              </div>
 
-            <MediaDropZone
-              file={sourceFile}
-              durationSecs={durationSecs}
-              disabled={taskId !== null}
-              onPickFile={() => void handlePickMedia()}
-              onDropFile={(path) => void loadSourcePath(path)}
-              onClear={handleClearSource}
-              onInvalidDrop={(msg) => setErrMsg(msg)}
-            />
+              <MediaDropZone
+                file={sourceFile}
+                durationSecs={durationSecs}
+                disabled={taskId !== null}
+                onPickFile={() => void handlePickMedia()}
+                onDropFile={(path) => void loadSourcePath(path)}
+                onClear={handleClearSource}
+                onInvalidDrop={(msg) => setErrMsg(msg)}
+              />
 
             {sourceFile && (
               <>
@@ -1273,65 +1394,28 @@ export function MediaToolsPage({
                 onSaveUpdatedMarkdown={() => void handleSaveUpdatedMarkdown()}
               />
             )}
-          </div>
-
-          <OutputLocationPicker
-            defaultExportDir={defaultExportDir}
-            sourceFilePath={sourceFile?.path}
-            defaultFileName={outputDialogMeta.defaultFileName}
-            fileFilterName={outputDialogMeta.filterName}
-            fileExtensions={outputDialogMeta.extensions}
-            value={outputTarget}
-            onChange={updateOutputTarget}
-            disabled={taskId !== null}
-          />
+            </div>
+          )}
         </div>
 
-        {/* Right column: Interactive Tool Workspace + Results */}
+        {/* Right column: Active Tool Settings + Destination + Results */}
         <div className="space-y-3 md:col-span-7 xl:col-span-8">
           <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-xs">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
                 <h2 className="text-base font-bold text-slate-900">
-                  2. Chọn thao tác xử lý Media
+                  {activeTool === "merge"
+                    ? "2. Chọn các video & Ghép"
+                    : `3. Tùy chỉnh: ${activeToolInfo.label}`}
                 </h2>
                 <p className="text-xs text-slate-500">
-                  Xử lý nhanh video &amp; âm thanh bằng FFmpeg hoặc tách MP3 tạo script AI có timestamp và phân vai.
+                  {activeToolInfo.shortDesc}
                 </p>
               </div>
             </div>
 
-            {/* Tool selector segmented pill bar */}
-            <div className="mt-3 flex flex-wrap gap-1.5 rounded-xl border border-slate-200 bg-slate-100 p-1">
-              {TOOL_TABS.map((t) => {
-                const Icon = t.icon;
-                const active = activeTool === t.id;
-                return (
-                  <button
-                    key={t.id}
-                    type="button"
-                    disabled={taskId !== null}
-                    title={t.shortDesc}
-                    onClick={() => handleSelectTool(t.id)}
-                    className={`inline-flex flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-lg px-3 py-2 text-xs font-semibold transition disabled:opacity-60 ${
-                      active
-                        ? "bg-white text-indigo-700 shadow-xs"
-                        : "text-slate-600 hover:text-slate-900"
-                    }`}
-                  >
-                    <Icon
-                      className={`h-3.5 w-3.5 shrink-0 ${
-                        active ? "text-indigo-600" : "text-slate-400"
-                      }`}
-                    />
-                    <span>{t.label}</span>
-                  </button>
-                );
-              })}
-            </div>
-
             {/* Active Tool Config Panel */}
-            <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-3.5">
+            <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-3.5">
               {activeTool === "compress" && (
                 <div className="space-y-3">
                   <div>
@@ -1534,9 +1618,18 @@ export function MediaToolsPage({
                       {mergeQueue.map((item, idx) => (
                         <div
                           key={item.id}
-                          className="flex items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs"
+                          className={`flex items-center justify-between gap-2 rounded-lg border px-3 py-2 text-xs transition ${
+                            mergePreviewPath === item.path
+                              ? "border-indigo-300 bg-indigo-50/50"
+                              : "border-slate-200 bg-white"
+                          }`}
                         >
-                          <div className="flex min-w-0 flex-1 items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setMergePreviewPath(item.path)}
+                            className="flex min-w-0 flex-1 items-center gap-2 text-left"
+                            title="Bấm để xem trước video này ở khung bên trái"
+                          >
                             <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-indigo-100 text-[11px] font-bold text-indigo-700">
                               {idx + 1}
                             </span>
@@ -1548,7 +1641,7 @@ export function MediaToolsPage({
                                 {item.path}
                               </p>
                             </div>
-                          </div>
+                          </button>
                           <div className="flex shrink-0 items-center gap-1">
                             <button
                               type="button"
@@ -1728,29 +1821,46 @@ export function MediaToolsPage({
                 </div>
               )}
 
-              <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => void handleRunTool()}
-                  disabled={
-                    (activeTool === "merge"
-                      ? mergeQueue.length < 2
-                      : !sourceFile) ||
-                    taskId !== null ||
-                    (!ffmpegAvailable && toolNeedsFfmpeg) ||
-                    videoToolBlockedOnAudio
+              <div className="mt-3 space-y-3 border-t border-slate-200/80 pt-3">
+                <OutputLocationPicker
+                  defaultExportDir={defaultExportDir}
+                  sourceFilePath={
+                    activeTool === "merge"
+                      ? mergeQueue[0]?.path
+                      : sourceFile?.path
                   }
-                  className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-bold text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {activeTool === "script" && <Sparkles className="h-4 w-4" />}
-                  {taskId
-                    ? "Đang xử lý..."
-                    : activeTool === "script"
-                    ? "Tách MP3 & Tạo Script AI"
-                    : activeTool === "merge"
-                    ? `Bắt đầu ghép (${mergeQueue.length} video)`
-                    : "Bắt đầu xử lý"}
-                </button>
+                  defaultFileName={outputDialogMeta.defaultFileName}
+                  fileFilterName={outputDialogMeta.filterName}
+                  fileExtensions={outputDialogMeta.extensions}
+                  value={outputTarget}
+                  onChange={updateOutputTarget}
+                  disabled={taskId !== null}
+                />
+
+                <div className="flex flex-wrap items-center justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => void handleRunTool()}
+                    disabled={
+                      (activeTool === "merge"
+                        ? mergeQueue.length < 2
+                        : !sourceFile) ||
+                      taskId !== null ||
+                      (!ffmpegAvailable && toolNeedsFfmpeg) ||
+                      videoToolBlockedOnAudio
+                    }
+                    className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-bold text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {activeTool === "script" && <Sparkles className="h-4 w-4" />}
+                    {taskId
+                      ? "Đang xử lý..."
+                      : activeTool === "script"
+                      ? "Tách MP3 & Tạo Script AI"
+                      : activeTool === "merge"
+                      ? `Bắt đầu ghép (${mergeQueue.length} video)`
+                      : "Bắt đầu xử lý"}
+                  </button>
+                </div>
               </div>
             </div>
           </div>
@@ -1769,14 +1879,14 @@ export function MediaToolsPage({
             </div>
           )}
 
-          {latestResult && (
+          {latestResult && latestResult.toolId === activeTool && (
             <MediaResultCard
               output={latestResult.output}
               actionLabel={latestResult.toolLabel}
             />
           )}
 
-          {scriptResult && (
+          {scriptResult && activeTool === "script" && (
             <MediaScriptResultPanel
               scriptResult={scriptResult}
               hasVideoSource={!isSourceAudio && Boolean(sourceFile)}
@@ -1845,6 +1955,20 @@ export function MediaToolsPage({
                       </span>
                     </div>
                     <div className="flex items-center gap-1.5">
+                      {/\.(mp4|mov|mkv|webm|avi|mp3|wav|m4a|aac|ogg|flac)$/i.test(
+                        item.output.output_path
+                      ) && (
+                        <button
+                          type="button"
+                          disabled={taskId !== null}
+                          onClick={() => void loadSourcePath(item.output.output_path)}
+                          className="inline-flex items-center gap-1 rounded border border-indigo-200 bg-white px-2 py-1 text-[11px] font-medium text-indigo-700 hover:bg-indigo-50 disabled:opacity-50"
+                          title="Nạp file này vào khung File nguồn bên trái để xem hoặc xử lý tiếp"
+                        >
+                          <ArrowUpLeft className="h-3 w-3" />
+                          Nạp nguồn
+                        </button>
+                      )}
                       <button
                         type="button"
                         onClick={() => api.openLocalFile(item.output.output_path)}
