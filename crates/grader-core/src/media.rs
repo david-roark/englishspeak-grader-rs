@@ -1787,7 +1787,7 @@ where
         let tail = stderr_tail
             .into_iter()
             .rev()
-            .take(3)
+            .take(10)
             .collect::<Vec<_>>()
             .into_iter()
             .rev()

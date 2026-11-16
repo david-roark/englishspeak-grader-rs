@@ -12,15 +12,23 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Install Linux Tauri system libraries & FFmpeg
+      - name: Install Linux Tauri system libraries
         run: |
           sudo apt-get update
           sudo apt-get install -y \
             libwebkit2gtk-4.1-dev \
             libappindicator3-dev \
             librsvg2-dev \
-            libssl-dev \
-            ffmpeg
+            libssl-dev
+
+      - name: Install FFmpeg (ffmpeg-static b6.1.1, match release sidecar)
+        run: |
+          curl -fsSL "https://github.com/eugeneware/ffmpeg-static/releases/download/b6.1.1/ffmpeg-linux-x64.gz" -o ffmpeg.gz
+          echo "bfe8a8fc511530457b528c48d77b5737527b504a3797a9bc4866aeca69c2dffa  ffmpeg.gz" | sha256sum -c -
+          gzip -dc ffmpeg.gz | sudo tee /usr/local/bin/ffmpeg >/dev/null
+          sudo chmod +x /usr/local/bin/ffmpeg
+          rm -f ffmpeg.gz
+          ffmpeg -version
 
       - name: Install Rust stable (with clippy & rustfmt)
         uses: dtolnay/rust-toolchain@stable
