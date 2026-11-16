@@ -184,6 +184,8 @@ export const api = {
       fastCopy: boolean;
     } | null;
     mute: boolean;
+    enhanceAudio?: boolean;
+    audioVolume?: number;
     outDirOverride?: string;
     outPathOverride?: string;
   }) =>
@@ -193,6 +195,8 @@ export const api = {
       compressPreset: params.compressPreset ?? null,
       trim: params.trim ?? null,
       mute: params.mute,
+      enhanceAudio: params.enhanceAudio ?? false,
+      audioVolume: params.audioVolume ?? 1.0,
       outDirOverride: params.outDirOverride || null,
       outPathOverride: params.outPathOverride || null,
     }),

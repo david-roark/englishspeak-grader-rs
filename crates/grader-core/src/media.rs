@@ -456,21 +456,51 @@ pub struct TrimRange {
     pub fast_copy: bool,
 }
 
-/// Tùy chọn gộp 1–3 thao tác chỉnh sửa (nén, cắt đoạn, xóa âm thanh) trong một lần chạy `ffmpeg`.
+/// Tùy chọn gộp các thao tác chỉnh sửa (nén, cắt đoạn, xóa âm thanh, lọc âm/âm lượng) trong một lần chạy `ffmpeg`.
 #[derive(Debug, Clone)]
 pub struct VideoEditOptions {
     pub compress_preset: Option<String>,
     pub trim: Option<TrimRange>,
     pub mute: bool,
+    pub enhance_audio: bool,
+    pub audio_volume: f32,
 }
 
-/// Dựng tham số CLI `ffmpeg` kết hợp cắt đoạn, nén video và/hoặc xóa âm thanh trong một lượt.
+fn build_edit_audio_filter(options: &VideoEditOptions) -> Option<String> {
+    if options.mute {
+        return None;
+    }
+    let mut parts = Vec::new();
+    if options.enhance_audio {
+        parts.push("highpass=f=80,lowpass=f=8000,dynaudnorm".to_string());
+    }
+    let vol = if options.audio_volume.is_finite() {
+        options.audio_volume.clamp(0.1, 4.0)
+    } else {
+        1.0
+    };
+    if (vol - 1.0).abs() > 0.01 {
+        parts.push(format!("volume={vol:.2}"));
+    }
+    if parts.is_empty() {
+        None
+    } else {
+        Some(parts.join(","))
+    }
+}
+
+/// Dựng tham số CLI `ffmpeg` kết hợp cắt đoạn, nén video, xóa âm thanh và/hoặc lọc âm/âm lượng trong một lượt.
 pub fn build_edit_video_args_to(
     input_path: &Path,
     options: &VideoEditOptions,
     out_path: &Path,
 ) -> Result<Vec<String>> {
-    if options.compress_preset.is_none() && options.trim.is_none() && !options.mute {
+    let audio_filter = build_edit_audio_filter(options);
+    if options.compress_preset.is_none()
+        && options.trim.is_none()
+        && !options.mute
+        && audio_filter.is_none()
+    {
         return Err(GraderError::InvalidInput(
             "Vui lòng chọn ít nhất một thao tác chỉnh sửa.".into(),
         ));
@@ -492,6 +522,10 @@ pub fn build_edit_video_args_to(
             args.push("-t".into());
             args.push(format!("{:.3}", end - trim.start_secs));
         }
+    }
+
+    if let Some(ref af) = audio_filter {
+        args.extend(["-af".into(), af.clone()]);
     }
 
     if let Some(preset_key) = options.compress_preset.as_deref() {
@@ -531,6 +565,25 @@ pub fn build_edit_video_args_to(
         if trim.fast_copy {
             if options.mute {
                 args.extend(["-c:v".into(), "copy".into(), "-an".into()]);
+            } else if audio_filter.is_some() {
+                if is_mp3_file(out_path) {
+                    args.extend([
+                        "-vn".into(),
+                        "-acodec".into(),
+                        "libmp3lame".into(),
+                        "-b:a".into(),
+                        "192k".into(),
+                    ]);
+                } else {
+                    args.extend([
+                        "-c:v".into(),
+                        "copy".into(),
+                        "-c:a".into(),
+                        "aac".into(),
+                        "-b:a".into(),
+                        "128k".into(),
+                    ]);
+                }
             } else {
                 args.extend(["-c".into(), "copy".into()]);
             }
@@ -562,9 +615,32 @@ pub fn build_edit_video_args_to(
         if is_mp4_family(out_path) {
             args.extend(["-movflags".into(), "+faststart".into()]);
         }
-    } else {
+    } else if options.mute {
         // Chỉ xóa âm thanh
         args.extend(["-c:v".into(), "copy".into(), "-an".into()]);
+        if is_mp4_family(out_path) {
+            args.extend(["-movflags".into(), "+faststart".into()]);
+        }
+    } else {
+        // Chỉ lọc âm / chỉnh âm lượng (giữ nguyên video stream nếu là video)
+        if is_mp3_file(out_path) {
+            args.extend([
+                "-vn".into(),
+                "-acodec".into(),
+                "libmp3lame".into(),
+                "-b:a".into(),
+                "192k".into(),
+            ]);
+        } else {
+            args.extend([
+                "-c:v".into(),
+                "copy".into(),
+                "-c:a".into(),
+                "aac".into(),
+                "-b:a".into(),
+                "128k".into(),
+            ]);
+        }
         if is_mp4_family(out_path) {
             args.extend(["-movflags".into(), "+faststart".into()]);
         }
@@ -1179,21 +1255,26 @@ where
     let (stem, ext) = file_stem_and_ext(input_path, "media", "mp4");
     let has_compress = options.compress_preset.is_some();
     let has_trim = options.trim.is_some();
-    let active_count =
-        usize::from(has_compress) + usize::from(has_trim) + usize::from(options.mute);
+    let has_audio_fx = build_edit_audio_filter(options).is_some();
+    let active_count = usize::from(has_compress)
+        + usize::from(has_trim)
+        + usize::from(options.mute)
+        + usize::from(has_audio_fx);
 
     let default_name = match (
         active_count,
         options.compress_preset.as_deref(),
         has_trim,
         options.mute,
+        has_audio_fx,
     ) {
-        (1, Some(preset_key), false, false) => {
+        (1, Some(preset_key), false, false, false) => {
             let cfg = get_video_preset(preset_key);
             format!("{stem}_compressed_{}.mp4", cfg.key)
         }
-        (1, None, true, false) => format!("{stem}_trim.{ext}"),
-        (1, None, false, true) => format!("{stem}_muted.{ext}"),
+        (1, None, true, false, false) => format!("{stem}_trim.{ext}"),
+        (1, None, false, true, false) => format!("{stem}_muted.{ext}"),
+        (1, None, false, false, true) => format!("{stem}_audio.{ext}"),
         _ => {
             let out_ext = if has_compress { "mp4" } else { ext };
             format!("{stem}_edited.{out_ext}")

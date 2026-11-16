@@ -906,6 +906,8 @@ pub async fn edit_video_cmd(
     compress_preset: Option<String>,
     trim: Option<TrimEditInput>,
     mute: bool,
+    enhance_audio: Option<bool>,
+    audio_volume: Option<f32>,
     out_dir_override: Option<String>,
     out_path_override: Option<String>,
 ) -> Result<MediaOutput, String> {
@@ -925,6 +927,8 @@ pub async fn edit_video_cmd(
             fast_copy: t.fast_copy,
         }),
         mute,
+        enhance_audio: enhance_audio.unwrap_or(false),
+        audio_volume: audio_volume.unwrap_or(1.0),
     };
 
     let cancel = state.register_task(&task_id).await;

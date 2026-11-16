@@ -19,6 +19,7 @@ import {
   Sparkles,
   Sun,
   Trash2,
+  Volume2,
   VolumeX,
 } from "lucide-react";
 import { LiveSubtitlePreview } from "../components/LiveSubtitlePreview";
@@ -138,6 +139,8 @@ export function MediaToolsPage({
   const [editCompress, setEditCompress] = useState(true);
   const [editTrim, setEditTrim] = useState(false);
   const [editMute, setEditMute] = useState(false);
+  const [editEnhanceAudio, setEditEnhanceAudio] = useState(false);
+  const [editAudioVolume, setEditAudioVolume] = useState(1.0);
   const [sourceFile, setSourceFile] = useState<FileInfo | null>(null);
   const [durationSecs, setDurationSecs] = useState<number | null>(null);
   const [outputTarget, setOutputTarget] = useState<OutputTargetState>(() =>
@@ -305,8 +308,14 @@ export function MediaToolsPage({
 
   const effectiveEditCompress = editCompress && !isSourceAudio;
   const effectiveEditMute = editMute && !isSourceAudio;
+  const effectiveEditAudioFx =
+    !effectiveEditMute &&
+    (editEnhanceAudio || Math.abs(editAudioVolume - 1.0) > 0.01);
   const effectiveEditCount =
-    Number(effectiveEditCompress) + Number(editTrim) + Number(effectiveEditMute);
+    Number(effectiveEditCompress) +
+    Number(editTrim) +
+    Number(effectiveEditMute) +
+    Number(effectiveEditAudioFx);
 
   const outputDialogMeta = useMemo(() => {
     const stem = sourceFile ? getFileStem(sourceFile.path) : "ket_qua";
@@ -324,6 +333,13 @@ export function MediaToolsPage({
           if (editTrim) {
             return {
               defaultFileName: `${stem}_trim.${srcExt}`,
+              filterName: "Media",
+              extensions: [srcExt, "mp4", "mp3"],
+            };
+          }
+          if (effectiveEditAudioFx) {
+            return {
+              defaultFileName: `${stem}_audio.${srcExt}`,
               filterName: "Media",
               extensions: [srcExt, "mp4", "mp3"],
             };
@@ -368,6 +384,7 @@ export function MediaToolsPage({
     activeTool,
     compPreset,
     editTrim,
+    effectiveEditAudioFx,
     effectiveEditCompress,
     effectiveEditCount,
     mergeQueue,
@@ -976,8 +993,8 @@ export function MediaToolsPage({
     if (activeTool === "edit" && effectiveEditCount === 0) {
       setErrMsg(
         isSourceAudio
-          ? "File âm thanh chỉ hỗ trợ Cắt đoạn ở mục này. Hãy bật Cắt đoạn hoặc chuyển sang Tách âm thanh / Tạo Script (AI)."
-          : "Hãy bật ít nhất 1 thao tác chỉnh sửa (Giảm dung lượng, Cắt đoạn hoặc Xóa âm thanh)."
+          ? "File âm thanh hỗ trợ Cắt đoạn và Lọc âm/Âm lượng ở mục này. Hãy bật ít nhất 1 tùy chọn để tiếp tục."
+          : "Hãy bật ít nhất 1 thao tác chỉnh sửa (Giảm dung lượng, Cắt đoạn, Xóa âm thanh hoặc Lọc âm/Âm lượng)."
       );
       return;
     }
@@ -993,6 +1010,12 @@ export function MediaToolsPage({
     if (effectiveEditCompress) editParts.push("Giảm dung lượng");
     if (editTrim) editParts.push("Cắt đoạn");
     if (effectiveEditMute) editParts.push("Xóa âm thanh");
+    if (!effectiveEditMute) {
+      if (editEnhanceAudio) editParts.push("Lọc âm");
+      if (Math.abs(editAudioVolume - 1.0) > 0.01) {
+        editParts.push(`Âm lượng ${Math.round(editAudioVolume * 100)}%`);
+      }
+    }
     const toolLabel =
       activeTool === "edit" && editParts.length > 0
         ? editParts.join(" + ")
@@ -1083,6 +1106,8 @@ export function MediaToolsPage({
                 }
               : null,
             mute: effectiveEditMute,
+            enhanceAudio: !effectiveEditMute && editEnhanceAudio,
+            audioVolume: effectiveEditMute ? 1.0 : editAudioVolume,
             ...overrides,
           });
         } else if (activeTool === "mp3" && sourceFile) {
@@ -1761,7 +1786,7 @@ export function MediaToolsPage({
                       <strong>1 lượt duy nhất</strong>.
                     </p>
                     <span className="rounded-full bg-indigo-100 px-2 py-0.5 text-[11px] font-semibold text-indigo-700">
-                      Đang chọn {effectiveEditCount}/3
+                      Đang chọn {effectiveEditCount}/4
                     </span>
                   </div>
 
@@ -1948,6 +1973,101 @@ export function MediaToolsPage({
                         Loại bỏ toàn bộ track âm thanh khỏi video đầu ra{effectiveEditCompress ? " trong cùng lượt nén" : " (giữ nguyên luồng hình ảnh gốc nên xử lý cực nhanh)"}.
                       </p>
                     )}
+                  </div>
+
+                  {/* 4. Lọc âm & Chỉnh âm lượng */}
+                  <div
+                    className={`rounded-lg border p-3 transition ${
+                      effectiveEditAudioFx
+                        ? "border-indigo-200 bg-white"
+                        : "border-slate-200 bg-slate-50/70"
+                    } ${effectiveEditMute ? "opacity-60" : ""}`}
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="flex items-center gap-2 text-xs font-semibold text-slate-800">
+                        <Volume2 className="h-3.5 w-3.5 text-indigo-600" />
+                        Lọc âm &amp; Độ to/nhỏ
+                      </span>
+                      {effectiveEditMute ? (
+                        <span className="text-[11px] text-slate-400">
+                          Đang bật Xóa âm thanh
+                        </span>
+                      ) : (
+                        effectiveEditAudioFx && (
+                          <button
+                            type="button"
+                            disabled={taskId !== null}
+                            onClick={() => {
+                              setEditEnhanceAudio(false);
+                              setEditAudioVolume(1.0);
+                            }}
+                            className="inline-flex items-center gap-0.5 text-[11px] font-semibold text-slate-500 hover:text-slate-800"
+                          >
+                            <RotateCcw className="h-3 w-3" />
+                            Đặt lại
+                          </button>
+                        )
+                      )}
+                    </div>
+
+                    <div className="mt-2.5 space-y-2.5 border-t border-slate-100 pt-2.5">
+                      <label
+                        className={`flex items-center gap-2 text-xs text-slate-700 ${
+                          effectiveEditMute ? "cursor-not-allowed" : "cursor-pointer"
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          disabled={effectiveEditMute || taskId !== null}
+                          checked={!effectiveEditMute && editEnhanceAudio}
+                          onChange={(e) => setEditEnhanceAudio(e.target.checked)}
+                          className="rounded border-slate-300 text-indigo-600"
+                        />
+                        <span>
+                          Lọc tạp âm &amp; làm rõ giọng nói (<code>highpass/lowpass/dynaudnorm</code>)
+                        </span>
+                      </label>
+
+                      <div className="space-y-1.5">
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="font-semibold text-slate-700">
+                            Âm lượng xuất file:{" "}
+                            <span className="font-mono text-indigo-600">
+                              {Math.round(editAudioVolume * 100)}%
+                            </span>
+                          </span>
+                          <div className="flex items-center gap-1">
+                            {[0.5, 1, 1.5, 2].map((v) => (
+                              <button
+                                key={v}
+                                type="button"
+                                disabled={effectiveEditMute || taskId !== null}
+                                onClick={() => setEditAudioVolume(v)}
+                                className={`rounded px-1.5 py-0.5 font-mono text-[10px] font-semibold transition disabled:opacity-50 ${
+                                  Math.abs(editAudioVolume - v) < 0.01
+                                    ? "bg-indigo-600 text-white"
+                                    : "border border-slate-200 bg-white text-slate-600 hover:bg-indigo-50"
+                                }`}
+                              >
+                                {Math.round(v * 100)}%
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                        <input
+                          type="range"
+                          min={0.25}
+                          max={2.5}
+                          step={0.05}
+                          disabled={effectiveEditMute || taskId !== null}
+                          value={editAudioVolume}
+                          onChange={(e) =>
+                            setEditAudioVolume(Number(e.target.value))
+                          }
+                          className="w-full accent-indigo-600 disabled:opacity-50"
+                        />
+                      </div>
+                    </div>
                   </div>
                 </div>
               )}
