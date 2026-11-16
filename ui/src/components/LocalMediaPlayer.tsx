@@ -16,6 +16,8 @@ interface LocalMediaPlayerProps {
   playbackRate?: number;
   videoFilterStyle?: string;
   onTimeUpdate?: (currentTimeSecs: number) => void;
+  onLoadedMetadata?: () => void;
+  onEnded?: () => void;
 }
 
 function assignMediaRef(
@@ -49,7 +51,16 @@ export const LocalMediaPlayer = forwardRef<
   HTMLMediaElement,
   LocalMediaPlayerProps
 >(function LocalMediaPlayer(
-  { path, kind, className, playbackRate = 1, videoFilterStyle, onTimeUpdate },
+  {
+    path,
+    kind,
+    className,
+    playbackRate = 1,
+    videoFilterStyle,
+    onTimeUpdate,
+    onLoadedMetadata,
+    onEnded,
+  },
   ref
 ) {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -84,7 +95,6 @@ export const LocalMediaPlayer = forwardRef<
     setErrorMsg(null);
     setReloadKey(0);
     setRetriedAuth(false);
-    setIsPortrait(false);
   }, [path]);
 
   useEffect(() => {
@@ -172,14 +182,18 @@ export const LocalMediaPlayer = forwardRef<
     <div className="space-y-1.5">
       {kind === "audio" ? (
         <audio
-          key={`${path}-${reloadKey}`}
+          key={reloadKey}
           ref={bindMediaRef}
           src={src}
           controls
           preload="auto"
-          onLoadedMetadata={() => setErrorMsg(null)}
+          onLoadedMetadata={() => {
+            setErrorMsg(null);
+            onLoadedMetadata?.();
+          }}
           onTimeUpdate={(e) => onTimeUpdate?.(e.currentTarget.currentTime)}
           onSeeked={(e) => onTimeUpdate?.(e.currentTarget.currentTime)}
+          onEnded={() => onEnded?.()}
           onError={(e) => handlePlaybackError(e.currentTarget.error)}
           className={className ?? "w-full"}
         />
@@ -192,7 +206,7 @@ export const LocalMediaPlayer = forwardRef<
           }
         >
           <video
-            key={`${path}-${reloadKey}`}
+            key={reloadKey}
             ref={bindMediaRef}
             src={src}
             controls
@@ -205,9 +219,11 @@ export const LocalMediaPlayer = forwardRef<
               if (v.videoWidth > 0 && v.videoHeight > 0) {
                 setIsPortrait(v.videoHeight > v.videoWidth);
               }
+              onLoadedMetadata?.();
             }}
             onTimeUpdate={(e) => onTimeUpdate?.(e.currentTarget.currentTime)}
             onSeeked={(e) => onTimeUpdate?.(e.currentTarget.currentTime)}
+            onEnded={() => onEnded?.()}
             onError={(e) => handlePlaybackError(e.currentTarget.error)}
             className={
               className ??

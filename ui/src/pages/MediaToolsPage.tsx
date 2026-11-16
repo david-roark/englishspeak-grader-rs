@@ -1,11 +1,12 @@
 import { useMemo, useRef, useState } from "react";
 import {
-  ArrowDown,
-  ArrowUp,
+  ArrowLeft,
+  ArrowRight,
   ArrowUpLeft,
   Clock,
   ExternalLink,
   FileText,
+  Film,
   FolderOpen,
   Layers,
   Minimize2,
@@ -64,6 +65,7 @@ interface MergeQueueItem {
   id: string;
   path: string;
   name: string;
+  durationSecs: number | null;
 }
 
 interface MediaToolsPageProps {
@@ -124,6 +126,13 @@ export function MediaToolsPage({
   hasCustomExportDir,
 }: MediaToolsPageProps) {
   const playerRef = useRef<HTMLVideoElement & HTMLAudioElement>(null);
+  const mergePlayerRef = useRef<HTMLVideoElement & HTMLAudioElement>(null);
+  const pendingMergeSeekRef = useRef<number | null>(null);
+  const [mergeCurrentTime, setMergeCurrentTime] = useState(0);
+  const [mergePreviewDuration, setMergePreviewDuration] = useState<
+    number | null
+  >(null);
+  const [mergeActiveIdx, setMergeActiveIdx] = useState<number | null>(null);
 
   const [activeTool, setActiveTool] = useState<MediaToolId>("edit");
   const [editCompress, setEditCompress] = useState(true);
@@ -369,15 +378,30 @@ export function MediaToolsPage({
   function addMergePaths(paths: string[]) {
     if (paths.length === 0) return;
     setErrMsg("");
-    setMergeQueue((prev) => [
-      ...prev,
-      ...paths.map((p, idx) => ({
-        id: `${Date.now()}_${idx}_${Math.random().toString(36).slice(2, 7)}`,
-        path: p,
-        name: p.split(/[/\\]/).pop() || p,
-      })),
-    ]);
+    const newItems: MergeQueueItem[] = paths.map((p, idx) => ({
+      id: `${Date.now()}_${idx}_${Math.random().toString(36).slice(2, 7)}`,
+      path: p,
+      name: p.split(/[/\\]/).pop() || p,
+      durationSecs: null,
+    }));
+    setMergeQueue((prev) => [...prev, ...newItems]);
     setMergePreviewPath((cur) => cur ?? paths[0]);
+
+    for (const item of newItems) {
+      void api
+        .probeMediaDuration(item.path)
+        .then((dur) => {
+          if (dur == null || !Number.isFinite(dur)) return;
+          setMergeQueue((prev) =>
+            prev.map((q) =>
+              q.id === item.id ? { ...q, durationSecs: dur } : q
+            )
+          );
+        })
+        .catch(() => {
+          // Ignore duration probe failure for individual clip
+        });
+    }
   }
 
   async function handlePickMergeVideos() {
@@ -407,6 +431,7 @@ export function MediaToolsPage({
   function capturePlayerTime(target: "start" | "end") {
     const current = playerRef.current?.currentTime;
     if (current == null || !Number.isFinite(current)) return;
+    setEditTrim(true);
     const formatted = formatEditableTimecode(current);
     if (target === "start") {
       setTrimStart(formatted);
@@ -415,14 +440,35 @@ export function MediaToolsPage({
     }
   }
 
-  function seekPlayerTo(rawTimestamp: string) {
-    const cleaned = rawTimestamp.trim().replace(/^\[|\]$/g, "");
-    const secs = parseTimecodeToSeconds(cleaned);
-    const el = playerRef.current;
-    if (secs === null || !el) return;
+  function handleTimelineRangeChange(target: "start" | "end", nextSecs: number) {
+    if (!Number.isFinite(nextSecs)) return;
+    setEditTrim(true);
+    const clamped = Math.max(0, nextSecs);
+    if (target === "start") {
+      const endLimit =
+        durationSecs && trimEnd.trim()
+          ? (parseTimecodeToSeconds(trimEnd) ?? durationSecs)
+          : durationSecs;
+      const safeStart =
+        endLimit != null ? Math.min(clamped, Math.max(0, endLimit - 0.5)) : clamped;
+      setTrimStart(formatEditableTimecode(safeStart));
+      if (playerRef.current) {
+        playerRef.current.currentTime = safeStart;
+        setPlayerCurrentTime(safeStart);
+      }
+    } else {
+      const startLimit = parseTimecodeToSeconds(trimStart || "0") ?? 0;
+      const safeEnd = Math.max(clamped, startLimit + 0.5);
+      setTrimEnd(formatEditableTimecode(safeEnd));
+      if (playerRef.current) {
+        playerRef.current.currentTime = safeEnd;
+        setPlayerCurrentTime(safeEnd);
+      }
+    }
+  }
 
-    setPlayerCurrentTime(secs);
-
+  function seekMediaElementTo(el: HTMLMediaElement | null, secs: number) {
+    if (!el || !Number.isFinite(secs)) return;
     const applySeekAndPlay = () => {
       try {
         el.currentTime = secs;
@@ -443,9 +489,73 @@ export function MediaToolsPage({
 
     if (el.readyState < 1) {
       el.addEventListener("loadedmetadata", applySeekAndPlay, { once: true });
-      el.load();
+      if (el.networkState === HTMLMediaElement.NETWORK_EMPTY) {
+        el.load();
+      }
     } else {
       applySeekAndPlay();
+    }
+  }
+
+  function seekPlayerTo(rawTimestamp: string) {
+    const cleaned = rawTimestamp.trim().replace(/^\[|\]$/g, "");
+    const secs = parseTimecodeToSeconds(cleaned);
+    if (secs === null || !playerRef.current) return;
+    setPlayerCurrentTime(secs);
+    seekMediaElementTo(playerRef.current, secs);
+  }
+
+  function handleClickMergeStoryboardClip(
+    idx: number,
+    item: MergeQueueItem,
+    startOffset: number | null
+  ) {
+    const mergedPath =
+      latestResult?.toolId === "merge" ? latestResult.output.output_path : null;
+    if (mergedPath && startOffset !== null) {
+      setMergeActiveIdx(null);
+      setMergeCurrentTime(startOffset);
+      if (mergePreviewPath === mergedPath) {
+        seekMediaElementTo(mergePlayerRef.current, startOffset);
+      } else {
+        pendingMergeSeekRef.current = startOffset;
+        setMergePreviewPath(mergedPath);
+      }
+      return;
+    }
+
+    setMergeActiveIdx(idx);
+    setMergeCurrentTime(0);
+    if (mergePreviewPath === item.path) {
+      seekMediaElementTo(mergePlayerRef.current, 0);
+    } else {
+      pendingMergeSeekRef.current = 0;
+      setMergePreviewPath(item.path);
+    }
+  }
+
+  function handleMergePreviewEnded() {
+    const mergedPath =
+      latestResult?.toolId === "merge" ? latestResult.output.output_path : null;
+    if (mergedPath && mergePreviewPath === mergedPath) {
+      return;
+    }
+    const currentIdx =
+      mergeActiveIdx !== null && mergeQueue[mergeActiveIdx]
+        ? mergeActiveIdx
+        : mergeQueue.findIndex((q) => q.path === mergePreviewPath);
+    const nextIdx = currentIdx + 1;
+    if (currentIdx < 0 || nextIdx >= mergeQueue.length) {
+      return;
+    }
+    const nextItem = mergeQueue[nextIdx];
+    setMergeActiveIdx(nextIdx);
+    setMergeCurrentTime(0);
+    if (mergePreviewPath === nextItem.path) {
+      seekMediaElementTo(mergePlayerRef.current, 0);
+    } else {
+      pendingMergeSeekRef.current = 0;
+      setMergePreviewPath(nextItem.path);
     }
   }
 
@@ -1059,8 +1169,38 @@ export function MediaToolsPage({
   const activeToolInfo =
     TOOL_TABS.find((t) => t.id === activeTool) ?? TOOL_TABS[0];
 
+  const parsedTrimStartSecs = Math.max(
+    0,
+    parseTimecodeToSeconds(trimStart || "0") ?? 0
+  );
+  const parsedTrimEndSecs =
+    durationSecs && durationSecs > 0
+      ? Math.min(
+          durationSecs,
+          Math.max(
+            parsedTrimStartSecs + 0.5,
+            parseTimecodeToSeconds(trimEnd) ?? durationSecs
+          )
+        )
+      : null;
+
+  const mergeTimelineEntries = useMemo(() => {
+    let cursor = 0;
+    let allKnown = true;
+    return mergeQueue.map((item) => {
+      const startOffset = allKnown ? cursor : null;
+      if (item.durationSecs != null && Number.isFinite(item.durationSecs)) {
+        cursor += item.durationSecs;
+      } else {
+        allKnown = false;
+      }
+      const endOffset = allKnown ? cursor : null;
+      return { item, startOffset, endOffset };
+    });
+  }, [mergeQueue]);
+
   return (
-    <div className="space-y-4">
+    <div className="space-y-3">
       {!ffmpegAvailable && (
         <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
           ⚠️ Chưa phát hiện <code>ffmpeg</code> trên hệ thống. Hãy vào tab{" "}
@@ -1069,370 +1209,541 @@ export function MediaToolsPage({
         </div>
       )}
 
-      {/* Step 1: Feature selector across the top */}
-      <div className="rounded-xl border border-slate-200 bg-white p-3.5 shadow-xs">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div>
-            <h2 className="text-sm font-bold text-slate-900">
-              1. Chọn tính năng xử lý Media
-            </h2>
-            <p className="text-xs text-slate-500">
-              Chọn thao tác muốn làm trước, rồi chọn video và tùy chỉnh thông số ở bên dưới.
-            </p>
+      {/* Pro Studio Top Bar: Mode Switcher & Quick Source Action */}
+      <div className="rounded-2xl border border-slate-200 bg-white p-2.5 shadow-xs">
+        <div className="flex flex-wrap items-center justify-between gap-2.5">
+          <div className="flex items-center gap-2 px-1">
+            <span className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-indigo-600 text-white">
+              <Film className="h-3.5 w-3.5" />
+            </span>
+            <div>
+              <p className="text-xs font-bold leading-tight text-slate-900">
+                Xưởng Media
+              </p>
+              <p className="text-[10px] text-slate-500">
+                {ffmpegAvailable ? "FFmpeg sẵn sàng" : "Thiếu FFmpeg"}
+              </p>
+            </div>
           </div>
-        </div>
 
-        <div className="mt-2.5 grid grid-cols-2 gap-1.5 rounded-xl border border-slate-200 bg-slate-100 p-1.5 lg:grid-cols-4">
-          {TOOL_TABS.map((t) => {
-            const Icon = t.icon;
-            const active = activeTool === t.id;
-            return (
-              <button
-                key={t.id}
-                type="button"
-                disabled={taskId !== null}
-                title={t.shortDesc}
-                onClick={() => handleSelectTool(t.id)}
-                className={`flex items-center gap-2.5 rounded-lg px-3 py-2.5 text-left transition disabled:opacity-60 ${
-                  active
-                    ? "bg-white text-indigo-700 shadow-xs ring-1 ring-indigo-200"
-                    : "text-slate-600 hover:bg-white/60 hover:text-slate-900"
-                }`}
-              >
-                <Icon
-                  className={`h-4 w-4 shrink-0 ${
-                    active ? "text-indigo-600" : "text-slate-400"
+          <div className="grid flex-1 grid-cols-2 gap-1 rounded-xl border border-slate-200 bg-slate-100 p-1 sm:grid-cols-4">
+            {TOOL_TABS.map((t) => {
+              const Icon = t.icon;
+              const active = activeTool === t.id;
+              return (
+                <button
+                  key={t.id}
+                  type="button"
+                  disabled={taskId !== null}
+                  title={t.shortDesc}
+                  onClick={() => handleSelectTool(t.id)}
+                  className={`flex items-center justify-center gap-1.5 rounded-lg px-2.5 py-2 text-xs font-semibold transition disabled:opacity-60 ${
+                    active
+                      ? "bg-white text-indigo-700 shadow-xs ring-1 ring-indigo-200"
+                      : "text-slate-600 hover:bg-white/60 hover:text-slate-900"
                   }`}
-                />
-                <div className="min-w-0">
-                  <p className="truncate text-xs font-semibold leading-tight">
-                    {t.label}
-                  </p>
-                  <p className="truncate text-[10px] text-slate-400">
-                    {t.shortDesc}
-                  </p>
-                </div>
-              </button>
-            );
-          })}
+                >
+                  <Icon
+                    className={`h-3.5 w-3.5 shrink-0 ${
+                      active ? "text-indigo-600" : "text-slate-400"
+                    }`}
+                  />
+                  <span className="truncate">{t.label}</span>
+                </button>
+              );
+            })}
+          </div>
         </div>
       </div>
 
-      {/* Step 2: Feature-tailored workspace */}
-      <div className="grid items-start gap-4 md:grid-cols-12">
-        {/* Left column: Sticky Media Preview, Player Controls & Inline Subtitle Editor */}
-        <div className="space-y-3 md:sticky md:top-3 md:col-span-6 md:max-h-[calc(100vh-1.5rem)] md:overflow-y-auto md:pr-0.5">
+      {/* Studio Workspace: Dark Monitor (Left 7 cols) + Clean Inspector (Right 5 cols) */}
+      <div className="grid items-start gap-3.5 lg:grid-cols-12">
+        {/* Left column: Studio Monitor + Transport/Timeline + Live Subtitle Editor */}
+        <div className="space-y-3 lg:sticky lg:top-3 lg:col-span-7 lg:max-h-[calc(100vh-1.5rem)] lg:overflow-y-auto lg:pr-0.5">
           {activeTool === "merge" ? (
-            <div className="space-y-3 rounded-xl border border-slate-200 bg-white p-3.5 shadow-xs">
-              <div className="flex items-center justify-between gap-2">
-                <h2 className="text-sm font-bold text-slate-900">
-                  2. Xem trước Video ghép
-                </h2>
+            <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xs">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-slate-50 px-3.5 py-2.5">
+                <div className="flex items-center gap-2">
+                  <span className="h-2 w-2 rounded-full bg-indigo-500" />
+                  <span className="text-xs font-bold tracking-wide text-slate-900">
+                    Monitor ghép video
+                  </span>
+                </div>
                 {mergePreviewPath && (
                   <span
-                    className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
+                    className={`rounded-full px-2.5 py-0.5 text-[10px] font-bold ${
                       latestResult?.output.output_path === mergePreviewPath
                         ? "bg-emerald-100 text-emerald-800"
                         : "bg-indigo-100 text-indigo-700"
                     }`}
                   >
                     {latestResult?.output.output_path === mergePreviewPath
-                      ? "Kết quả đã ghép"
-                      : "Clip trong danh sách"}
+                      ? "Thành phẩm đã ghép"
+                      : "Clip trong dải ghép"}
                   </span>
                 )}
               </div>
 
-              {mergePreviewPath ? (
-                <>
-                  <LocalMediaPlayer
-                    path={mergePreviewPath}
-                    kind="video"
-                    playbackRate={playbackRate}
+              <div className="p-3.5">
+                {mergePreviewPath ? (
+                  <div className="space-y-2.5">
+                    <LocalMediaPlayer
+                      ref={mergePlayerRef}
+                      path={mergePreviewPath}
+                      kind="video"
+                      playbackRate={playbackRate}
+                      onTimeUpdate={setMergeCurrentTime}
+                      onEnded={handleMergePreviewEnded}
+                      onLoadedMetadata={() => {
+                        const dur = mergePlayerRef.current?.duration;
+                        if (dur != null && Number.isFinite(dur) && dur > 0) {
+                          setMergePreviewDuration(dur);
+                        }
+                        const pending = pendingMergeSeekRef.current;
+                        if (pending !== null) {
+                          pendingMergeSeekRef.current = null;
+                          seekMediaElementTo(mergePlayerRef.current, pending);
+                        }
+                      }}
+                    />
+                    <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs">
+                      <span className="min-w-0 flex-1 truncate font-medium text-slate-700">
+                        {mergePreviewPath.split(/[/\\]/).pop() || mergePreviewPath}
+                      </span>
+                      <button
+                        type="button"
+                        disabled={taskId !== null}
+                        onClick={() => {
+                          void loadSourcePath(mergePreviewPath);
+                          handleSelectTool("script");
+                        }}
+                        className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-indigo-600 px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-indigo-700 disabled:opacity-50"
+                        title="Nạp video này làm file nguồn và chuyển sang Tạo Script (AI)"
+                      >
+                        <Sparkles className="h-3 w-3" />
+                        Tạo Script từ video này
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex aspect-video flex-col items-center justify-center rounded-xl border border-dashed border-slate-300 bg-slate-50 px-4 text-center text-xs text-slate-500">
+                    <Layers className="mb-2 h-8 w-8 text-slate-300" />
+                    <p className="font-semibold text-slate-700">
+                      Chưa có clip trên Monitor
+                    </p>
+                    <p className="mt-1 max-w-sm text-[11px] text-slate-500">
+                      Thêm video vào dải Storyboard bên dưới — bấm từng clip để xem trước hoặc xem ngay thành phẩm sau khi ghép.
+                    </p>
+                  </div>
+                )}
+              </div>
+            </div>
+          ) : (
+            <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xs">
+              {/* Monitor Top Chrome */}
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-slate-50 px-3.5 py-2.5">
+                <div className="flex min-w-0 items-center gap-2">
+                  <span
+                    className={`h-2 w-2 shrink-0 rounded-full ${
+                      sourceFile ? "bg-emerald-500" : "bg-slate-400"
+                    }`}
                   />
-                  <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-2 text-xs">
-                    <span className="min-w-0 flex-1 truncate font-medium text-slate-700">
-                      {mergePreviewPath.split(/[/\\]/).pop() || mergePreviewPath}
+                  <span className="truncate text-xs font-bold text-slate-900">
+                    {sourceFile ? sourceFile.name : "Monitor xem trước"}
+                  </span>
+                  {sourceFile && (
+                    <span className="rounded bg-slate-200/80 px-1.5 py-0.5 text-[10px] font-semibold text-slate-700">
+                      {isSourceAudio ? "AUDIO" : "VIDEO"}
                     </span>
+                  )}
+                </div>
+                <div className="flex items-center gap-1.5">
+                  {durationSecs != null && (
+                    <span className="inline-flex items-center gap-1 rounded-md bg-white px-2 py-0.5 font-mono text-[11px] font-semibold text-slate-700 ring-1 ring-slate-200">
+                      <Clock className="h-3 w-3 text-indigo-600" />
+                      {formatDuration(playerCurrentTime)} /{" "}
+                      {formatDuration(durationSecs)}
+                    </span>
+                  )}
+                  <button
+                    type="button"
+                    disabled={taskId !== null}
+                    onClick={() => void handlePickMedia()}
+                    className="rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-700 hover:border-indigo-300 hover:bg-indigo-50 hover:text-indigo-700 disabled:opacity-50"
+                  >
+                    {sourceFile ? "Đổi file" : "Chọn file"}
+                  </button>
+                  {sourceFile && (
                     <button
                       type="button"
                       disabled={taskId !== null}
-                      onClick={() => {
-                        void loadSourcePath(mergePreviewPath);
-                        handleSelectTool("script");
-                      }}
-                      className="inline-flex shrink-0 items-center gap-1 rounded-md bg-indigo-600 px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-indigo-700 disabled:opacity-50"
-                      title="Nạp video này làm file nguồn và chuyển sang Tạo Script (AI)"
+                      onClick={handleClearSource}
+                      className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold text-slate-500 hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600 disabled:opacity-50"
+                      title="Gỡ file nguồn"
                     >
-                      <Sparkles className="h-3 w-3" />
-                      Tạo Script từ video này
+                      Gỡ
                     </button>
-                  </div>
-                </>
-              ) : (
-                <div className="flex aspect-video flex-col items-center justify-center rounded-lg border border-dashed border-slate-300 bg-slate-50 px-4 text-center text-xs text-slate-500">
-                  <Layers className="mb-2 h-7 w-7 text-slate-300" />
-                  <p className="font-semibold text-slate-700">
-                    Chưa có video để xem trước
-                  </p>
-                  <p className="mt-1 text-[11px]">
-                    Chọn các video ở bên phải — bấm vào từng video để xem trước, hoặc xem ngay video thành phẩm sau khi ghép xong.
-                  </p>
+                  )}
                 </div>
-              )}
-            </div>
-          ) : (
-            <div className="space-y-3 rounded-xl border border-slate-200 bg-white p-3.5 shadow-xs">
-              <div className="flex items-center justify-between">
-                <h2 className="text-sm font-bold text-slate-900">
-                  2. Chọn Video / Audio nguồn
-                </h2>
-                {durationSecs != null && (
-                  <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-700">
-                    <Clock className="h-3 w-3" />
-                    {formatDuration(durationSecs)}
-                  </span>
-                )}
               </div>
 
-              <MediaDropZone
-                file={sourceFile}
-                durationSecs={durationSecs}
-                disabled={taskId !== null}
-                onPickFile={() => void handlePickMedia()}
-                onDropFile={(path) => void loadSourcePath(path)}
-                onClear={handleClearSource}
-                onInvalidDrop={(msg) => setErrMsg(msg)}
-              />
+              <div className="space-y-3 p-3.5">
+                {!sourceFile ? (
+                  <MediaDropZone
+                    file={sourceFile}
+                    durationSecs={durationSecs}
+                    disabled={taskId !== null}
+                    onPickFile={() => void handlePickMedia()}
+                    onDropFile={(path) => void loadSourcePath(path)}
+                    onClear={handleClearSource}
+                    onInvalidDrop={(msg) => setErrMsg(msg)}
+                  />
+                ) : (
+                  <>
+                    <LocalMediaPlayer
+                      ref={playerRef}
+                      path={sourceFile.path}
+                      kind={isSourceAudio ? "audio" : "video"}
+                      playbackRate={playbackRate}
+                      videoFilterStyle={videoFilterStyle}
+                      onTimeUpdate={(secs) => {
+                        setPlayerCurrentTime(secs);
+                        if (loopActiveSegment && activePreviewSegment) {
+                          const s = parseTimecodeToSeconds(
+                            activePreviewSegment.start_time
+                          );
+                          const e = parseTimecodeToSeconds(
+                            activePreviewSegment.end_time
+                          );
+                          if (
+                            s !== null &&
+                            e !== null &&
+                            e > s &&
+                            secs >= e - 0.05 &&
+                            playerRef.current &&
+                            !playerRef.current.paused
+                          ) {
+                            playerRef.current.currentTime = s;
+                          }
+                        }
+                      }}
+                      className={isSourceAudio ? "w-full" : undefined}
+                    />
 
-            {sourceFile && (
-              <>
-                <LocalMediaPlayer
-                  ref={playerRef}
-                  path={sourceFile.path}
-                  kind={isSourceAudio ? "audio" : "video"}
-                  playbackRate={playbackRate}
-                  videoFilterStyle={videoFilterStyle}
-                  onTimeUpdate={(secs) => {
-                    setPlayerCurrentTime(secs);
-                    if (loopActiveSegment && activePreviewSegment) {
-                      const s = parseTimecodeToSeconds(
-                        activePreviewSegment.start_time
-                      );
-                      const e = parseTimecodeToSeconds(
-                        activePreviewSegment.end_time
-                      );
-                      if (
-                        s !== null &&
-                        e !== null &&
-                        e > s &&
-                        secs >= e - 0.05 &&
-                        playerRef.current &&
-                        !playerRef.current.paused
-                      ) {
-                        playerRef.current.currentTime = s;
-                      }
-                    }
-                  }}
-                  className={isSourceAudio ? "w-full" : undefined}
-                />
-
-                {/* Compact playback speed, loop & brightness controls */}
-                <div className="space-y-2 rounded-lg border border-slate-200 bg-slate-50/80 px-2.5 py-2">
-                  <div className="flex flex-wrap items-center justify-between gap-1.5">
-                    <div className="flex items-center gap-1">
-                      <span className="text-[10px] font-semibold text-slate-500">
-                        Tốc độ:
-                      </span>
-                      {[0.75, 1, 1.25, 1.5].map((rate) => (
-                        <button
-                          key={rate}
-                          type="button"
-                          onClick={() => setPlaybackRate(rate)}
-                          className={`rounded px-1.5 py-0.5 text-[10px] font-bold transition ${
-                            playbackRate === rate
-                              ? "bg-indigo-600 text-white"
-                              : "bg-white text-slate-600 hover:bg-indigo-50 hover:text-indigo-700"
-                          }`}
-                        >
-                          {rate}x
-                        </button>
-                      ))}
-                    </div>
-
-                    <div className="flex items-center gap-1">
-                      {scriptResult && (
-                        <button
-                          type="button"
-                          onClick={() => setLoopActiveSegment((v) => !v)}
-                          className={`inline-flex items-center gap-1 rounded px-2 py-0.5 text-[10px] font-semibold transition ${
-                            loopActiveSegment
-                              ? "bg-indigo-600 text-white"
-                              : "border border-slate-200 bg-white text-slate-600 hover:bg-indigo-50 hover:text-indigo-700"
-                          }`}
-                          title="Lặp lại câu phụ đề đang phát để nghe kỹ"
-                        >
-                          <Repeat className="h-2.5 w-2.5" />
-                          Loop câu
-                        </button>
-                      )}
-                      {!isSourceAudio && (
-                        <button
-                          type="button"
-                          onClick={() => setShowVideoAdjustPanel((v) => !v)}
-                          className={`inline-flex items-center gap-1 rounded px-2 py-0.5 text-[10px] font-semibold transition ${
-                            showVideoAdjustPanel || hasVideoAdjustments
-                              ? "border border-amber-300 bg-amber-50 text-amber-800"
-                              : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-100"
-                          }`}
-                          title="Chỉnh độ sáng, tương phản, chống ngược sáng"
-                        >
-                          <Sun className="h-2.5 w-2.5" />
-                          Ánh sáng
-                        </button>
-                      )}
-                    </div>
-                  </div>
-
-                  {!isSourceAudio && showVideoAdjustPanel && (
-                    <div className="space-y-2 border-t border-slate-200 pt-2">
-                      <div className="flex flex-wrap items-center justify-between gap-1">
-                        <div className="flex flex-wrap gap-1">
-                          {[
-                            { label: "Mặc định", b: 0, c: 1, g: 1 },
-                            { label: "Sáng nhẹ", b: 0.08, c: 1.05, g: 1.1 },
-                            { label: "Ngược sáng", b: 0.1, c: 1.08, g: 1.35 },
-                            { label: "Tối nhẹ", b: -0.08, c: 1.05, g: 0.92 },
-                          ].map((preset) => (
+                    {/* Studio Transport Bar: Speed, Loop, Light Adjustments & In/Out Markers */}
+                    <div className="space-y-2.5 rounded-xl border border-slate-200 bg-slate-50/90 px-3 py-2.5">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="flex items-center gap-1">
+                          <span className="mr-0.5 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+                            Tốc độ
+                          </span>
+                          {[0.75, 1, 1.25, 1.5].map((rate) => (
                             <button
-                              key={preset.label}
+                              key={rate}
                               type="button"
-                              onClick={() => {
-                                setVideoBrightness(preset.b);
-                                setVideoContrast(preset.c);
-                                setVideoGamma(preset.g);
-                              }}
-                              className="rounded border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-semibold text-slate-700 hover:border-amber-300 hover:bg-amber-50"
+                              onClick={() => setPlaybackRate(rate)}
+                              className={`rounded-md px-2 py-0.5 font-mono text-[11px] font-bold transition ${
+                                playbackRate === rate
+                                  ? "bg-indigo-600 text-white"
+                                  : "border border-slate-200 bg-white text-slate-600 hover:bg-indigo-50 hover:text-indigo-700"
+                              }`}
                             >
-                              {preset.label}
+                              {rate}x
                             </button>
                           ))}
                         </div>
-                        {hasVideoAdjustments && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setVideoBrightness(0);
-                              setVideoContrast(1);
-                              setVideoGamma(1);
-                            }}
-                            className="inline-flex items-center gap-0.5 text-[10px] font-semibold text-slate-500 hover:text-slate-800"
-                          >
-                            <RotateCcw className="h-2.5 w-2.5" />
-                            Đặt lại
-                          </button>
+
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          {activeTool === "edit" && (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => capturePlayerTime("start")}
+                                className="inline-flex items-center gap-1 rounded-md border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-[11px] font-semibold text-indigo-700 hover:bg-indigo-100"
+                                title="Đặt mốc bắt đầu cắt tại vị trí hiện tại"
+                              >
+                                <Scissors className="h-3 w-3" />
+                                Đặt In ({trimStart || "00:00"})
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => capturePlayerTime("end")}
+                                className="inline-flex items-center gap-1 rounded-md border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-[11px] font-semibold text-indigo-700 hover:bg-indigo-100"
+                                title="Đặt mốc kết thúc cắt tại vị trí hiện tại"
+                              >
+                                Đặt Out (
+                                {trimEnd ||
+                                  (durationSecs
+                                    ? formatEditableTimecode(durationSecs)
+                                    : "--:--")}
+                                )
+                              </button>
+                            </>
+                          )}
+                          {scriptResult && (
+                            <button
+                              type="button"
+                              onClick={() => setLoopActiveSegment((v) => !v)}
+                              className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-semibold transition ${
+                                loopActiveSegment
+                                  ? "bg-indigo-600 text-white"
+                                  : "border border-slate-200 bg-white text-slate-600 hover:bg-indigo-50 hover:text-indigo-700"
+                              }`}
+                              title="Lặp lại câu phụ đề đang phát để nghe kỹ"
+                            >
+                              <Repeat className="h-3 w-3" />
+                              Loop câu
+                            </button>
+                          )}
+                          {!isSourceAudio && (
+                            <button
+                              type="button"
+                              onClick={() => setShowVideoAdjustPanel((v) => !v)}
+                              className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-semibold transition ${
+                                showVideoAdjustPanel || hasVideoAdjustments
+                                  ? "border border-amber-300 bg-amber-50 text-amber-800"
+                                  : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-100"
+                              }`}
+                              title="Chỉnh độ sáng, tương phản, chống ngược sáng"
+                            >
+                              <Sun className="h-3 w-3" />
+                              Ánh sáng
+                            </button>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Visual Trim Range Scrubber (in Edit mode) */}
+                      {activeTool === "edit" &&
+                        durationSecs != null &&
+                        durationSecs > 0 &&
+                        parsedTrimEndSecs != null && (
+                          <div className="space-y-1.5 border-t border-slate-200 pt-2">
+                            <div className="flex items-center justify-between text-[10px] text-slate-500">
+                              <span className="font-semibold text-slate-700">
+                                Thanh chọn đoạn cắt{" "}
+                                {!editTrim && (
+                                  <span className="font-normal text-slate-400">
+                                    (kéo hoặc bấm Đặt In/Out để tự bật Cắt đoạn)
+                                  </span>
+                                )}
+                              </span>
+                              <span className="font-mono font-semibold text-indigo-600">
+                                Giữ lại:{" "}
+                                {formatDuration(
+                                  Math.max(0, parsedTrimEndSecs - parsedTrimStartSecs)
+                                )}
+                              </span>
+                            </div>
+
+                            {/* Visual track bar */}
+                            <div className="relative h-2 w-full overflow-hidden rounded-full bg-slate-200">
+                              <div
+                                className={`absolute top-0 bottom-0 rounded-full transition-all ${
+                                  editTrim ? "bg-indigo-600" : "bg-slate-400"
+                                }`}
+                                style={{
+                                  left: `${(parsedTrimStartSecs / durationSecs) * 100}%`,
+                                  width: `${Math.max(
+                                    2,
+                                    ((parsedTrimEndSecs - parsedTrimStartSecs) /
+                                      durationSecs) *
+                                      100
+                                  )}%`,
+                                }}
+                              />
+                              <div
+                                className="absolute top-0 bottom-0 w-0.5 bg-amber-500"
+                                style={{
+                                  left: `${Math.min(
+                                    100,
+                                    (playerCurrentTime / durationSecs) * 100
+                                  )}%`,
+                                }}
+                              />
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-2 text-[10px]">
+                              <label className="flex items-center gap-2 text-slate-600">
+                                <span className="shrink-0 font-mono font-semibold text-slate-700">
+                                  In: {formatEditableTimecode(parsedTrimStartSecs)}
+                                </span>
+                                <input
+                                  type="range"
+                                  min={0}
+                                  max={Math.max(0.5, durationSecs - 0.5)}
+                                  step={0.5}
+                                  value={parsedTrimStartSecs}
+                                  onChange={(e) =>
+                                    handleTimelineRangeChange(
+                                      "start",
+                                      Number(e.target.value)
+                                    )
+                                  }
+                                  className="w-full accent-indigo-600"
+                                />
+                              </label>
+                              <label className="flex items-center gap-2 text-slate-600">
+                                <span className="shrink-0 font-mono font-semibold text-slate-700">
+                                  Out: {formatEditableTimecode(parsedTrimEndSecs)}
+                                </span>
+                                <input
+                                  type="range"
+                                  min={0.5}
+                                  max={durationSecs}
+                                  step={0.5}
+                                  value={parsedTrimEndSecs}
+                                  onChange={(e) =>
+                                    handleTimelineRangeChange(
+                                      "end",
+                                      Number(e.target.value)
+                                    )
+                                  }
+                                  className="w-full accent-indigo-600"
+                                />
+                              </label>
+                            </div>
+                          </div>
                         )}
-                      </div>
 
-                      <div className="grid gap-1.5 text-[10px]">
-                        <label className="flex items-center gap-2">
-                          <span className="w-24 shrink-0 font-semibold text-slate-600">
-                            Độ sáng ({videoBrightness >= 0 ? "+" : ""}
-                            {Math.round(videoBrightness * 100)}%)
-                          </span>
-                          <input
-                            type="range"
-                            min={-0.3}
-                            max={0.3}
-                            step={0.02}
-                            value={videoBrightness}
-                            onChange={(e) =>
-                              setVideoBrightness(Number(e.target.value))
-                            }
-                            className="w-full accent-amber-600"
-                          />
-                        </label>
-                        <label className="flex items-center gap-2">
-                          <span className="w-24 shrink-0 font-semibold text-slate-600">
-                            Tương phản ({videoContrast.toFixed(2)}x)
-                          </span>
-                          <input
-                            type="range"
-                            min={0.7}
-                            max={1.5}
-                            step={0.05}
-                            value={videoContrast}
-                            onChange={(e) =>
-                              setVideoContrast(Number(e.target.value))
-                            }
-                            className="w-full accent-amber-600"
-                          />
-                        </label>
-                        <label className="flex items-center gap-2">
-                          <span className="w-24 shrink-0 font-semibold text-slate-600">
-                            Ngược sáng ({videoGamma.toFixed(2)})
-                          </span>
-                          <input
-                            type="range"
-                            min={0.7}
-                            max={1.8}
-                            step={0.05}
-                            value={videoGamma}
-                            onChange={(e) =>
-                              setVideoGamma(Number(e.target.value))
-                            }
-                            className="w-full accent-amber-600"
-                          />
-                        </label>
-                      </div>
+                      {!isSourceAudio && showVideoAdjustPanel && (
+                        <div className="space-y-2 border-t border-slate-200 pt-2">
+                          <div className="flex flex-wrap items-center justify-between gap-1">
+                            <div className="flex flex-wrap gap-1">
+                              {[
+                                { label: "Mặc định", b: 0, c: 1, g: 1 },
+                                { label: "Sáng nhẹ", b: 0.08, c: 1.05, g: 1.1 },
+                                { label: "Ngược sáng", b: 0.1, c: 1.08, g: 1.35 },
+                                { label: "Tối nhẹ", b: -0.08, c: 1.05, g: 0.92 },
+                              ].map((preset) => (
+                                <button
+                                  key={preset.label}
+                                  type="button"
+                                  onClick={() => {
+                                    setVideoBrightness(preset.b);
+                                    setVideoContrast(preset.c);
+                                    setVideoGamma(preset.g);
+                                  }}
+                                  className="rounded border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-semibold text-slate-700 hover:border-amber-300 hover:bg-amber-50"
+                                >
+                                  {preset.label}
+                                </button>
+                              ))}
+                            </div>
+                            {hasVideoAdjustments && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setVideoBrightness(0);
+                                  setVideoContrast(1);
+                                  setVideoGamma(1);
+                                }}
+                                className="inline-flex items-center gap-0.5 text-[10px] font-semibold text-slate-500 hover:text-slate-800"
+                              >
+                                <RotateCcw className="h-2.5 w-2.5" />
+                                Đặt lại
+                              </button>
+                            )}
+                          </div>
+
+                          <div className="grid gap-1.5 text-[10px] text-slate-600">
+                            <label className="flex items-center gap-2">
+                              <span className="w-24 shrink-0 font-semibold">
+                                Độ sáng ({videoBrightness >= 0 ? "+" : ""}
+                                {Math.round(videoBrightness * 100)}%)
+                              </span>
+                              <input
+                                type="range"
+                                min={-0.3}
+                                max={0.3}
+                                step={0.02}
+                                value={videoBrightness}
+                                onChange={(e) =>
+                                  setVideoBrightness(Number(e.target.value))
+                                }
+                                className="w-full accent-amber-600"
+                              />
+                            </label>
+                            <label className="flex items-center gap-2">
+                              <span className="w-24 shrink-0 font-semibold">
+                                Tương phản ({videoContrast.toFixed(2)}x)
+                              </span>
+                              <input
+                                type="range"
+                                min={0.7}
+                                max={1.5}
+                                step={0.05}
+                                value={videoContrast}
+                                onChange={(e) =>
+                                  setVideoContrast(Number(e.target.value))
+                                }
+                                className="w-full accent-amber-600"
+                              />
+                            </label>
+                            <label className="flex items-center gap-2">
+                              <span className="w-24 shrink-0 font-semibold">
+                                Ngược sáng ({videoGamma.toFixed(2)})
+                              </span>
+                              <input
+                                type="range"
+                                min={0.7}
+                                max={1.8}
+                                step={0.05}
+                                value={videoGamma}
+                                onChange={(e) =>
+                                  setVideoGamma(Number(e.target.value))
+                                }
+                                className="w-full accent-amber-600"
+                              />
+                            </label>
+                          </div>
+                        </div>
+                      )}
                     </div>
-                  )}
-                </div>
-              </>
-            )}
-
-            {scriptResult && (
-              <LiveSubtitlePreview
-                segments={scriptResult.transcript.segments}
-                speakers={scriptResult.transcript.speakers}
-                activeSegmentIdx={activeSegmentIdx}
-                activePreviewSegment={activePreviewSegment}
-                playerCurrentTime={playerCurrentTime}
-                subtitleFont={subtitleFont}
-                showSubRole={showSubRole}
-                showSubSpeaker={showSubSpeaker}
-                showSubText={showSubText}
-                showSubTranslation={showSubTranslation}
-                showSubGrammar={showSubGrammar}
-                scriptDirty={scriptDirty}
-                exportBusy={exportBusy}
-                hasVideoSource={!isSourceAudio && Boolean(sourceFile)}
-                ffmpegAvailable={ffmpegAvailable}
-                isTaskBusy={taskId !== null}
-                onSeekPlayerTo={seekPlayerTo}
-                onUpdateSegmentAt={updateSegmentAt}
-                onAssignSegmentSpeaker={assignSegmentSpeaker}
-                onCaptureSegmentTime={captureSegmentTime}
-                onNudgeSegmentTime={nudgeSegmentTime}
-                onExportSegmentClip={(idx) => void handleExportSegmentClip(idx)}
-                onInsertSegmentAtCurrentTime={insertSegmentAtCurrentTime}
-                onDeleteSegmentAt={deleteSegmentAt}
-                onSaveUpdatedMarkdown={() => void handleSaveUpdatedMarkdown()}
-              />
-            )}
+                  </>
+                )}
+              </div>
             </div>
+          )}
+
+          {activeTool === "script" && scriptResult && (
+            <LiveSubtitlePreview
+              segments={scriptResult.transcript.segments}
+              speakers={scriptResult.transcript.speakers}
+              activeSegmentIdx={activeSegmentIdx}
+              activePreviewSegment={activePreviewSegment}
+              playerCurrentTime={playerCurrentTime}
+              subtitleFont={subtitleFont}
+              showSubRole={showSubRole}
+              showSubSpeaker={showSubSpeaker}
+              showSubText={showSubText}
+              showSubTranslation={showSubTranslation}
+              showSubGrammar={showSubGrammar}
+              scriptDirty={scriptDirty}
+              exportBusy={exportBusy}
+              hasVideoSource={!isSourceAudio && Boolean(sourceFile)}
+              ffmpegAvailable={ffmpegAvailable}
+              isTaskBusy={taskId !== null}
+              onSeekPlayerTo={seekPlayerTo}
+              onUpdateSegmentAt={updateSegmentAt}
+              onAssignSegmentSpeaker={assignSegmentSpeaker}
+              onCaptureSegmentTime={captureSegmentTime}
+              onNudgeSegmentTime={nudgeSegmentTime}
+              onExportSegmentClip={(idx) => void handleExportSegmentClip(idx)}
+              onInsertSegmentAtCurrentTime={insertSegmentAtCurrentTime}
+              onDeleteSegmentAt={deleteSegmentAt}
+              onSaveUpdatedMarkdown={() => void handleSaveUpdatedMarkdown()}
+            />
           )}
         </div>
 
-        {/* Right column: Active Tool Settings + Destination + Results */}
-        <div className="space-y-3 md:col-span-6">
-          <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-xs">
+        {/* Right column: Clean Inspector Panel (5 cols) */}
+        <div className="space-y-3 lg:col-span-5">
+          <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-xs">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
-                <h2 className="text-base font-bold text-slate-900">
-                  {activeTool === "merge"
-                    ? "2. Chọn các video & Ghép"
-                    : `3. Tùy chỉnh: ${activeToolInfo.label}`}
+                <h2 className="text-sm font-bold text-slate-900">
+                  Inspector — {activeToolInfo.label}
                 </h2>
                 <p className="text-xs text-slate-500">
                   {activeToolInfo.shortDesc}
@@ -1497,7 +1808,7 @@ export function MediaToolsPage({
                           className="w-full"
                           ariaLabel="Preset nén video"
                         />
-                        <p className="text-[11px] text-slate-500">
+                        <p className="line-clamp-1 text-[11px] text-slate-500">
                           Giảm mạnh dung lượng để gửi Gemini nhanh hơn hoặc chia sẻ dễ dàng mà vẫn giữ rõ lời nói.
                         </p>
                       </div>
@@ -1582,7 +1893,7 @@ export function MediaToolsPage({
                         </div>
 
                         {effectiveEditCompress ? (
-                          <p className="text-[11px] text-slate-500">
+                          <p className="line-clamp-1 text-[11px] text-slate-500">
                             Đang bật <strong>Giảm dung lượng</strong> nên FFmpeg sẽ cắt và nén cùng lúc trong 1 lượt (chính xác từng khung hình).
                           </p>
                         ) : (
@@ -1669,44 +1980,50 @@ export function MediaToolsPage({
                 <div className="space-y-3">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <p className="text-xs text-slate-600">
-                      Chọn từ <strong>2 video trở lên</strong> theo thứ tự cần nối. Hệ thống tự chuẩn hóa kích thước &amp; âm thanh để ghép mượt kể cả khi các video khác độ phân giải.
+                      Sắp xếp thứ tự các video ở <strong>Dải Storyboard</strong> bên dưới rồi bấm ghép (tối thiểu 2 video).
                     </p>
-                    <div className="flex flex-wrap items-center gap-1.5">
+                    <span className="rounded-full bg-indigo-100 px-2 py-0.5 text-[11px] font-semibold text-indigo-700">
+                      {mergeQueue.length} clip
+                    </span>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <button
+                      type="button"
+                      disabled={taskId !== null}
+                      onClick={() => void handlePickMergeVideos()}
+                      className="inline-flex items-center gap-1 rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-indigo-700 disabled:opacity-50"
+                    >
+                      <Plus className="h-3.5 w-3.5" />
+                      Chọn thêm video
+                    </button>
+                    {sourceFile && !isSourceAudio && (
                       <button
                         type="button"
                         disabled={taskId !== null}
-                        onClick={() => void handlePickMergeVideos()}
-                        className="inline-flex items-center gap-1 rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-indigo-700 disabled:opacity-50"
+                        onClick={() => addMergePaths([sourceFile.path])}
+                        className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 hover:border-indigo-300 hover:bg-indigo-50 hover:text-indigo-700 disabled:opacity-50"
                       >
                         <Plus className="h-3.5 w-3.5" />
-                        Chọn thêm video
+                        Thêm file nguồn
                       </button>
-                      {sourceFile && !isSourceAudio && (
-                        <button
-                          type="button"
-                          disabled={taskId !== null}
-                          onClick={() => addMergePaths([sourceFile.path])}
-                          className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 hover:border-indigo-300 hover:bg-indigo-50 hover:text-indigo-700 disabled:opacity-50"
-                        >
-                          <Plus className="h-3.5 w-3.5" />
-                          Thêm file nguồn
-                        </button>
-                      )}
-                      {mergeQueue.length > 0 && (
-                        <button
-                          type="button"
-                          disabled={taskId !== null}
-                          onClick={() => setMergeQueue([])}
-                          className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-600 hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600 disabled:opacity-50"
-                        >
-                          Xóa tất cả
-                        </button>
-                      )}
-                    </div>
+                    )}
+                    {mergeQueue.length > 0 && (
+                      <button
+                        type="button"
+                        disabled={taskId !== null}
+                        onClick={() => setMergeQueue([])}
+                        className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-600 hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600 disabled:opacity-50"
+                      >
+                        Xóa tất cả
+                      </button>
+                    )}
                   </div>
 
                   {sessionHistory.some(
-                    (h) => !isAudioFilePath(h.output.output_path) && /\.(mp4|mov|mkv|webm|avi)$/i.test(h.output.output_path)
+                    (h) =>
+                      !isAudioFilePath(h.output.output_path) &&
+                      /\.(mp4|mov|mkv|webm|avi)$/i.test(h.output.output_path)
                   ) && (
                     <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
                       <span className="font-semibold text-slate-500">
@@ -1716,7 +2033,9 @@ export function MediaToolsPage({
                         .filter(
                           (h) =>
                             !isAudioFilePath(h.output.output_path) &&
-                            /\.(mp4|mov|mkv|webm|avi)$/i.test(h.output.output_path)
+                            /\.(mp4|mov|mkv|webm|avi)$/i.test(
+                              h.output.output_path
+                            )
                         )
                         .slice(0, 4)
                         .map((h) => (
@@ -1735,80 +2054,7 @@ export function MediaToolsPage({
                     </div>
                   )}
 
-                  {mergeQueue.length === 0 ? (
-                    <div className="rounded-lg border border-dashed border-slate-300 bg-white px-4 py-6 text-center text-xs text-slate-500">
-                      Chưa có video nào trong danh sách ghép. Bấm{" "}
-                      <strong>Chọn thêm video</strong> ở trên để bắt đầu.
-                    </div>
-                  ) : (
-                    <div className="max-h-60 space-y-1.5 overflow-y-auto pr-1">
-                      {mergeQueue.map((item, idx) => (
-                        <div
-                          key={item.id}
-                          className={`flex items-center justify-between gap-2 rounded-lg border px-3 py-2 text-xs transition ${
-                            mergePreviewPath === item.path
-                              ? "border-indigo-300 bg-indigo-50/50"
-                              : "border-slate-200 bg-white"
-                          }`}
-                        >
-                          <button
-                            type="button"
-                            onClick={() => setMergePreviewPath(item.path)}
-                            className="flex min-w-0 flex-1 items-center gap-2 text-left"
-                            title="Bấm để xem trước video này ở khung bên trái"
-                          >
-                            <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-indigo-100 text-[11px] font-bold text-indigo-700">
-                              {idx + 1}
-                            </span>
-                            <div className="min-w-0">
-                              <p className="truncate font-semibold text-slate-800">
-                                {item.name}
-                              </p>
-                              <p className="truncate text-[10px] text-slate-400">
-                                {item.path}
-                              </p>
-                            </div>
-                          </button>
-                          <div className="flex shrink-0 items-center gap-1">
-                            <button
-                              type="button"
-                              disabled={idx === 0 || taskId !== null}
-                              onClick={() => moveMergeItem(idx, -1)}
-                              className="rounded border border-slate-200 bg-slate-50 p-1 text-slate-600 hover:bg-indigo-50 hover:text-indigo-700 disabled:opacity-40"
-                              title="Đưa lên trước"
-                              aria-label="Đưa lên trước"
-                            >
-                              <ArrowUp className="h-3 w-3" />
-                            </button>
-                            <button
-                              type="button"
-                              disabled={
-                                idx === mergeQueue.length - 1 || taskId !== null
-                              }
-                              onClick={() => moveMergeItem(idx, 1)}
-                              className="rounded border border-slate-200 bg-slate-50 p-1 text-slate-600 hover:bg-indigo-50 hover:text-indigo-700 disabled:opacity-40"
-                              title="Đưa xuống sau"
-                              aria-label="Đưa xuống sau"
-                            >
-                              <ArrowDown className="h-3 w-3" />
-                            </button>
-                            <button
-                              type="button"
-                              disabled={taskId !== null}
-                              onClick={() => removeMergeItem(item.id)}
-                              className="rounded border border-slate-200 bg-slate-50 p-1 text-slate-500 hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600 disabled:opacity-40"
-                              title="Xóa khỏi danh sách"
-                              aria-label="Xóa khỏi danh sách"
-                            >
-                              <Trash2 className="h-3 w-3" />
-                            </button>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-
-                  <label className="flex cursor-pointer items-center gap-2 text-xs text-slate-700">
+                  <label className="flex cursor-pointer items-center gap-2 rounded-lg border border-slate-200 bg-white p-2.5 text-xs text-slate-700">
                     <input
                       type="checkbox"
                       checked={mergeFastCopy}
@@ -1936,7 +2182,7 @@ export function MediaToolsPage({
                     />
                   </div>
 
-                  <p className="text-[11px] text-slate-500">
+                  <p className="line-clamp-1 text-[11px] text-slate-500">
                     Mẹo: Tự động tách MP3 mono trước khi gửi Gemini giúp giảm ~90% dung lượng upload và tiết kiệm quota token so với gửi video trực tiếp. Đang dùng model: <strong>{model}</strong>.
                   </p>
                 </div>
@@ -2122,6 +2368,359 @@ export function MediaToolsPage({
           )}
         </div>
       </div>
+
+      {/* Bottom Studio Dock: Horizontal Storyboard Track for Merge */}
+      {activeTool === "merge" && (() => {
+        const mergedPath =
+          latestResult?.toolId === "merge"
+            ? latestResult.output.output_path
+            : null;
+        const isShowingMerged =
+          mergedPath !== null && mergePreviewPath === mergedPath;
+        const totalQueueDuration =
+          mergeTimelineEntries[mergeTimelineEntries.length - 1]?.endOffset ??
+          null;
+        const displayTotalDur = isShowingMerged
+          ? (mergePreviewDuration ?? totalQueueDuration)
+          : totalQueueDuration;
+        const activeMergedIdx = isShowingMerged
+          ? mergeTimelineEntries.findIndex(
+              ({ startOffset, endOffset }) =>
+                startOffset !== null &&
+                endOffset !== null &&
+                mergeCurrentTime >= startOffset &&
+                mergeCurrentTime < endOffset
+            )
+          : -1;
+        const activeSimIdx = !isShowingMerged
+          ? mergeActiveIdx !== null && mergeQueue[mergeActiveIdx]
+            ? mergeActiveIdx
+            : mergeQueue.findIndex((q) => q.path === mergePreviewPath)
+          : -1;
+        const activeSimStart =
+          activeSimIdx >= 0
+            ? mergeTimelineEntries[activeSimIdx]?.startOffset ?? null
+            : null;
+        const simulatedGlobalTime =
+          activeSimStart !== null ? activeSimStart + mergeCurrentTime : null;
+
+        return (
+        <div className="rounded-2xl border border-slate-200 bg-white p-3.5 shadow-xs">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <span className="inline-flex h-6 w-6 items-center justify-center rounded-md bg-indigo-600 text-white">
+                <Layers className="h-3.5 w-3.5" />
+              </span>
+              <div>
+                <h3 className="text-xs font-bold text-slate-900">
+                  Dải Storyboard ghép nối ({mergeQueue.length} clip)
+                  {displayTotalDur != null && displayTotalDur > 0 && (
+                    <span className="ml-2 font-mono text-[11px] font-semibold text-indigo-600">
+                      {isShowingMerged
+                        ? `${formatDuration(mergeCurrentTime)} / ${formatDuration(displayTotalDur)}`
+                        : simulatedGlobalTime != null
+                        ? `${formatDuration(simulatedGlobalTime)} / ${formatDuration(displayTotalDur)}`
+                        : `Tổng ${formatDuration(displayTotalDur)}`}
+                    </span>
+                  )}
+                </h3>
+                <p className="line-clamp-1 text-[11px] text-slate-500">
+                  {activeMergedIdx >= 0
+                    ? `Đang phát clip #${activeMergedIdx + 1} (${mergeQueue[activeMergedIdx]?.name}) — bấm vào clip hoặc thanh tiến trình để tua.`
+                    : isShowingMerged
+                    ? "Bấm vào clip hoặc thanh tiến trình dưới từng clip để tua video thành phẩm."
+                    : activeSimIdx >= 0
+                    ? `Đang xem thử nối tiếp: clip #${activeSimIdx + 1} (${mergeQueue[activeSimIdx]?.name}) — tự chuyển tiếp clip sau khi hết.`
+                    : "Thứ tự phát từ trái sang phải — bấm vào clip để xem thử nối tiếp trên Monitor."}
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-1.5">
+              {!isShowingMerged && mergeQueue.length >= 2 && (
+                <button
+                  type="button"
+                  onClick={() =>
+                    handleClickMergeStoryboardClip(
+                      0,
+                      mergeQueue[0],
+                      mergeTimelineEntries[0]?.startOffset ?? null
+                    )
+                  }
+                  className="inline-flex items-center gap-1 rounded-lg border border-indigo-200 bg-white px-2.5 py-1 text-xs font-semibold text-indigo-700 hover:bg-indigo-50"
+                >
+                  Xem thử nối tiếp
+                </button>
+              )}
+              {mergedPath && mergePreviewPath !== mergedPath && (
+                <button
+                  type="button"
+                  onClick={() => setMergePreviewPath(mergedPath)}
+                  className="inline-flex items-center gap-1 rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700 hover:bg-emerald-100"
+                >
+                  Xem thành phẩm
+                </button>
+              )}
+              <button
+                type="button"
+                disabled={taskId !== null}
+                onClick={() => void handlePickMergeVideos()}
+                className="inline-flex items-center gap-1 rounded-lg border border-indigo-200 bg-indigo-50 px-2.5 py-1 text-xs font-semibold text-indigo-700 hover:bg-indigo-100 disabled:opacity-50"
+              >
+                <Plus className="h-3.5 w-3.5" />
+                Thêm clip
+              </button>
+            </div>
+          </div>
+
+          <div className="mt-3 flex gap-2.5 overflow-x-auto pb-1">
+            {mergeTimelineEntries.map(({ item, startOffset, endOffset }, idx) => {
+              const isActiveInMerged =
+                isShowingMerged &&
+                startOffset !== null &&
+                endOffset !== null &&
+                mergeCurrentTime >= startOffset &&
+                mergeCurrentTime < endOffset;
+              const isFinishedInMerged =
+                isShowingMerged &&
+                endOffset !== null &&
+                mergeCurrentTime >= endOffset;
+              const isPreviewingSingle =
+                !isShowingMerged && activeSimIdx === idx;
+              const isFinishedInSim =
+                !isShowingMerged && activeSimIdx > idx;
+              const isFinished = isFinishedInMerged || isFinishedInSim;
+              const isPreviewing = isActiveInMerged || isPreviewingSingle;
+
+              const clipDur =
+                item.durationSecs ??
+                (startOffset !== null && endOffset !== null
+                  ? endOffset - startOffset
+                  : isPreviewingSingle
+                  ? mergePreviewDuration
+                  : null);
+
+              let clipPct = 0;
+              if (isShowingMerged && startOffset !== null && endOffset !== null) {
+                const span = Math.max(0.1, endOffset - startOffset);
+                clipPct = Math.min(
+                  100,
+                  Math.max(0, ((mergeCurrentTime - startOffset) / span) * 100)
+                );
+              } else if (isFinishedInSim) {
+                clipPct = 100;
+              } else if (isPreviewingSingle && clipDur && clipDur > 0) {
+                clipPct = Math.min(
+                  100,
+                  Math.max(0, (mergeCurrentTime / clipDur) * 100)
+                );
+              }
+
+              return (
+                <div
+                  key={item.id}
+                  className={`flex w-56 shrink-0 flex-col justify-between rounded-xl border p-2.5 transition ${
+                    isPreviewing
+                      ? "border-indigo-500 bg-indigo-50/60 ring-2 ring-indigo-200"
+                      : isFinished
+                      ? "border-emerald-300 bg-emerald-50/30"
+                      : "border-slate-200 bg-slate-50/70 hover:border-slate-300"
+                  }`}
+                >
+                  <button
+                    type="button"
+                    onClick={() =>
+                      handleClickMergeStoryboardClip(idx, item, startOffset)
+                    }
+                    className="text-left"
+                    title={
+                      mergedPath && startOffset !== null
+                        ? `Tua video ghép tới ${formatDuration(startOffset)}`
+                        : "Bấm để phát từ clip này và tự chuyển tiếp"
+                    }
+                  >
+                    <div className="flex items-center justify-between gap-1">
+                      <span
+                        className={`inline-flex items-center rounded-md px-1.5 py-0.5 font-mono text-[10px] font-bold text-white ${
+                          isFinished ? "bg-emerald-600" : "bg-indigo-600"
+                        }`}
+                      >
+                        #{idx + 1}
+                      </span>
+                      {startOffset !== null && endOffset !== null ? (
+                        <span className="font-mono text-[10px] font-semibold text-slate-500">
+                          {formatDuration(startOffset)} →{" "}
+                          {formatDuration(endOffset)}
+                        </span>
+                      ) : item.durationSecs != null ? (
+                        <span className="font-mono text-[10px] text-slate-500">
+                          {formatDuration(item.durationSecs)}
+                        </span>
+                      ) : isPreviewing ? (
+                        <span className="text-[10px] font-semibold text-indigo-700">
+                          Đang xem
+                        </span>
+                      ) : null}
+                    </div>
+                    <p className="mt-1.5 truncate text-xs font-semibold text-slate-900">
+                      {item.name}
+                    </p>
+                    <p className="truncate text-[10px] text-slate-400">
+                      {item.path}
+                    </p>
+                  </button>
+
+                  {/* Per-clip progress bar */}
+                  <div className="mt-2 space-y-1">
+                    <div
+                      role="slider"
+                      tabIndex={0}
+                      aria-label={`Tiến trình clip #${idx + 1}`}
+                      aria-valuemin={0}
+                      aria-valuemax={100}
+                      aria-valuenow={Math.round(clipPct)}
+                      onClick={(e) => {
+                        const rect = e.currentTarget.getBoundingClientRect();
+                        if (rect.width <= 0 || !clipDur || clipDur <= 0) return;
+                        const ratio = Math.min(
+                          1,
+                          Math.max(0, (e.clientX - rect.left) / rect.width)
+                        );
+                        if (mergedPath && startOffset !== null) {
+                          const target = startOffset + ratio * clipDur;
+                          setMergeCurrentTime(target);
+                          if (mergePreviewPath !== mergedPath) {
+                            pendingMergeSeekRef.current = target;
+                            setMergePreviewPath(mergedPath);
+                          } else {
+                            seekMediaElementTo(mergePlayerRef.current, target);
+                          }
+                        } else {
+                          const target = ratio * clipDur;
+                          setMergeActiveIdx(idx);
+                          setMergeCurrentTime(target);
+                          if (mergePreviewPath !== item.path) {
+                            pendingMergeSeekRef.current = target;
+                            setMergePreviewPath(item.path);
+                          } else {
+                            seekMediaElementTo(mergePlayerRef.current, target);
+                          }
+                        }
+                      }}
+                      onKeyDown={(e) => {
+                        if (
+                          (e.key === "ArrowLeft" || e.key === "ArrowRight") &&
+                          clipDur &&
+                          clipDur > 0
+                        ) {
+                          e.preventDefault();
+                          const delta = e.key === "ArrowRight" ? 2 : -2;
+                          if (isShowingMerged && startOffset !== null) {
+                            const next = Math.max(
+                              startOffset,
+                              Math.min(
+                                startOffset + clipDur,
+                                mergeCurrentTime + delta
+                              )
+                            );
+                            setMergeCurrentTime(next);
+                            seekMediaElementTo(mergePlayerRef.current, next);
+                          } else if (isPreviewingSingle) {
+                            const next = Math.max(
+                              0,
+                              Math.min(clipDur, mergeCurrentTime + delta)
+                            );
+                            setMergeCurrentTime(next);
+                            seekMediaElementTo(mergePlayerRef.current, next);
+                          }
+                        }
+                      }}
+                      className="h-2 w-full cursor-pointer overflow-hidden rounded-full bg-slate-200"
+                      title={
+                        clipDur
+                          ? "Bấm vào thanh tiến trình để tua trong clip này"
+                          : "Đang tải thời lượng clip"
+                      }
+                    >
+                      <div
+                        className={`h-full rounded-full transition-[width] duration-150 ${
+                          isFinished ? "bg-emerald-500" : "bg-indigo-600"
+                        }`}
+                        style={{ width: `${clipPct}%` }}
+                      />
+                    </div>
+                    <div className="flex items-center justify-between font-mono text-[9px] text-slate-500">
+                      <span>
+                        {isActiveInMerged && startOffset !== null
+                          ? `${formatDuration(mergeCurrentTime - startOffset)} / ${formatDuration(clipDur ?? 0)}`
+                          : isPreviewingSingle
+                          ? `${formatDuration(mergeCurrentTime)} / ${formatDuration(clipDur ?? 0)}`
+                          : isFinished
+                          ? "Đã phát xong"
+                          : clipDur != null
+                          ? formatDuration(clipDur)
+                          : "--:--"}
+                      </span>
+                      {isActiveInMerged && displayTotalDur != null && (
+                        <span className="font-semibold text-indigo-600">
+                          {Math.round(clipPct)}%
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="mt-2 flex items-center justify-between border-t border-slate-200/80 pt-2">
+                    <div className="flex items-center gap-1">
+                      <button
+                        type="button"
+                        disabled={idx === 0 || taskId !== null}
+                        onClick={() => moveMergeItem(idx, -1)}
+                        className="rounded border border-slate-200 bg-white p-1 text-slate-600 hover:bg-indigo-50 hover:text-indigo-700 disabled:opacity-40"
+                        title="Chuyển sang trái"
+                        aria-label="Chuyển sang trái"
+                      >
+                        <ArrowLeft className="h-3 w-3" />
+                      </button>
+                      <button
+                        type="button"
+                        disabled={
+                          idx === mergeQueue.length - 1 || taskId !== null
+                        }
+                        onClick={() => moveMergeItem(idx, 1)}
+                        className="rounded border border-slate-200 bg-white p-1 text-slate-600 hover:bg-indigo-50 hover:text-indigo-700 disabled:opacity-40"
+                        title="Chuyển sang phải"
+                        aria-label="Chuyển sang phải"
+                      >
+                        <ArrowRight className="h-3 w-3" />
+                      </button>
+                    </div>
+                    <button
+                      type="button"
+                      disabled={taskId !== null}
+                      onClick={() => removeMergeItem(item.id)}
+                      className="rounded border border-slate-200 bg-white p-1 text-slate-500 hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600 disabled:opacity-40"
+                      title="Xóa khỏi dải ghép"
+                      aria-label="Xóa khỏi dải ghép"
+                    >
+                      <Trash2 className="h-3 w-3" />
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+
+            <button
+              type="button"
+              disabled={taskId !== null}
+              onClick={() => void handlePickMergeVideos()}
+              className="flex min-h-[120px] w-40 shrink-0 flex-col items-center justify-center gap-1 rounded-xl border border-dashed border-slate-300 bg-slate-50/50 px-3 text-xs font-semibold text-slate-500 transition hover:border-indigo-400 hover:bg-indigo-50/40 hover:text-indigo-700 disabled:opacity-50"
+            >
+              <Plus className="h-5 w-5" />
+              <span>Thêm video</span>
+            </button>
+          </div>
+        </div>
+        );
+      })()}
     </div>
   );
 }
